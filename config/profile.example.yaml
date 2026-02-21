@@ -1,0 +1,38 @@
+chrome:
+  debug_port: 9222
+  profile_dir: /tmp/jessy-chrome-profile
+  auto_launch: true
+  binary_path: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  startup_urls:
+    - https://www.linkedin.com/jobs/search/
+    - https://web.telegram.org/
+
+crawl:
+  max_pages_per_search_tab: 5
+  stop_on_repeat_pages: true
+  request_delay_ms: 1500
+
+filters:
+  words_to_avoid_in_title:
+    - intern
+    - unpaid
+  skills_to_avoid:
+    - dotnet
+    - java
+
+openai:
+  base_url: https://api.openai.com/v1
+  model: gpt-4o-mini
+  # Option A: set direct key here
+  # api_key: sk-...
+  # Option B: read key from env var name
+  api_key_env: OPENAI_API_KEY
+
+retention:
+  days: 90
+
+report:
+  terminal_style: verbose_cards
+
+storage:
+  db_path: data/jessy.db
