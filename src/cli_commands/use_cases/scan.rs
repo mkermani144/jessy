@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use futures_util::stream::{self, StreamExt};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, info_span, warn, Instrument};
@@ -222,6 +222,8 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
     let snapshot = extract_search_with_retry(session.as_mut(), adapter.as_ref())
         .await
         .context("search extraction failed in dev scan")?;
+    let platform = adapter.kind();
+    let is_linkedin = platform == PlatformKind::LinkedIn;
 
     let cards = if snapshot.job_cards.is_empty() {
         snapshot
@@ -230,6 +232,8 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
             .map(|job_url| crate::domain::job::SearchCardData {
                 title: String::new(),
                 job_url: job_url.clone(),
+                footer_items: Vec::new(),
+                posted_datetime: None,
             })
             .collect::<Vec<_>>()
     } else {
@@ -238,6 +242,18 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
 
     let mut rows: Vec<(usize, ReportRow)> = Vec::new();
     let mut seeds: Vec<(usize, JobSeed)> = Vec::new();
+    if is_linkedin {
+        let now = Utc::now();
+        if let Some(reason) = cards
+            .iter()
+            .find_map(|card| linkedin_search_skip_reason(&cfg.filters, card, now))
+        {
+            info!(event = "dev_stop_linkedin_tab_prefilter", reason = %reason);
+            println!("Dev scan skipped: LinkedIn tab rejected at prefilter ({reason}).");
+            return Ok(());
+        }
+    }
+
     for (idx, card) in cards.into_iter().enumerate() {
         let pre_match = policy::title_pre_match(&cfg.filters, &card.title);
         if !pre_match.should_open_detail {
@@ -271,7 +287,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
         seeds.push((
             idx,
             JobSeed {
-                platform: adapter.kind(),
+                platform,
                 source_tab_url: tab.url.clone(),
                 page_index: 1,
                 url: card.job_url,
@@ -495,6 +511,8 @@ async fn scan_search_tab(
     let mut seen_fingerprints_in_run = std::collections::HashSet::new();
     let mut seeds = Vec::new();
     let tab_key = make_tab_key(&tab.url);
+    let platform = adapter.kind();
+    let is_linkedin = platform == PlatformKind::LinkedIn;
 
     for idx in 1..=cfg.crawl.max_pages_per_search_tab {
         let snapshot = extract_search_with_retry(session, adapter)
@@ -528,11 +546,27 @@ async fn scan_search_tab(
                 .map(|job_url| crate::domain::job::SearchCardData {
                     title: String::new(),
                     job_url: job_url.clone(),
+                    footer_items: Vec::new(),
+                    posted_datetime: None,
                 })
                 .collect::<Vec<_>>()
         } else {
             snapshot.job_cards.clone()
         };
+        if is_linkedin {
+            let now = Utc::now();
+            if let Some(reason) = cards
+                .iter()
+                .find_map(|card| linkedin_search_skip_reason(&cfg.filters, card, now))
+            {
+                info!(
+                    event = "stop_linkedin_tab_prefilter",
+                    page_index = idx,
+                    reason = %reason
+                );
+                return Ok(Vec::new());
+            }
+        }
 
         let total_cards = cards.len();
         let mut queued = 0usize;
@@ -564,7 +598,7 @@ async fn scan_search_tab(
             }
 
             seeds.push(JobSeed {
-                platform: adapter.kind(),
+                platform,
                 source_tab_url: tab.url.clone(),
                 page_index,
                 url: card.job_url,
@@ -1298,6 +1332,67 @@ fn is_search_snapshot_usable(snapshot: &crate::domain::job::SearchPageData) -> b
     !(snapshot.job_cards.is_empty() && snapshot.job_links.is_empty())
 }
 
+fn linkedin_search_skip_reason(
+    filters: &crate::config::FiltersConfig,
+    card: &crate::domain::job::SearchCardData,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    if card
+        .footer_items
+        .iter()
+        .any(|item| item.trim().eq_ignore_ascii_case("viewed"))
+    {
+        return Some("linkedin_card_already_viewed".to_string());
+    }
+
+    if let Some(posted_datetime) = card.posted_datetime.as_deref() {
+        if is_posted_datetime_stale(posted_datetime, filters.recent_posted_within_hours, now) {
+            return Some(format!(
+                "linkedin_posted_older_than_{}h",
+                filters.recent_posted_within_hours
+            ));
+        }
+    }
+
+    None
+}
+
+fn is_posted_datetime_stale(datetime_attr: &str, max_age_hours: u64, now: DateTime<Utc>) -> bool {
+    let Some(posted_at) = parse_linkedin_datetime(datetime_attr) else {
+        return false;
+    };
+    now.signed_duration_since(posted_at) > ChronoDuration::hours(max_age_hours as i64)
+}
+
+fn parse_linkedin_datetime(datetime_attr: &str) -> Option<DateTime<Utc>> {
+    let trimmed = datetime_attr.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(trimmed) {
+        return Some(parsed.with_timezone(&Utc));
+    }
+
+    for format in [
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%d %H:%M",
+    ] {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(trimmed, format) {
+            return Some(Utc.from_utc_datetime(&parsed));
+        }
+    }
+
+    if let Ok(parsed) = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
+        let at_midnight = parsed.and_hms_opt(0, 0, 0)?;
+        return Some(Utc.from_utc_datetime(&at_midnight));
+    }
+
+    None
+}
+
 fn is_detail_snapshot_usable(snapshot: &crate::domain::job::JobDetailData) -> bool {
     let about_job_dom_present = !snapshot.about_job_dom.trim().is_empty();
     let title_present = !snapshot.title.trim().is_empty();
@@ -1384,4 +1479,68 @@ fn sanitize_error_message(raw: &str) -> String {
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_filters() -> crate::config::FiltersConfig {
+        crate::config::FiltersConfig {
+            words_to_avoid_in_title: vec![],
+            skills_to_avoid: vec![],
+            recent_posted_within_hours: 24,
+        }
+    }
+
+    #[test]
+    fn linkedin_card_with_viewed_footer_is_skipped() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec!["Viewed".to_string()],
+            posted_datetime: None,
+        };
+        let now = Utc
+            .with_ymd_and_hms(2026, 2, 22, 12, 0, 0)
+            .single()
+            .unwrap();
+
+        let reason = linkedin_search_skip_reason(&base_filters(), &card, now);
+        assert_eq!(reason.as_deref(), Some("linkedin_card_already_viewed"));
+    }
+
+    #[test]
+    fn linkedin_card_older_than_recent_window_is_skipped() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_datetime: Some("2026-02-20".to_string()),
+        };
+        let now = Utc
+            .with_ymd_and_hms(2026, 2, 22, 12, 0, 0)
+            .single()
+            .unwrap();
+
+        let reason = linkedin_search_skip_reason(&base_filters(), &card, now);
+        assert_eq!(reason.as_deref(), Some("linkedin_posted_older_than_24h"));
+    }
+
+    #[test]
+    fn linkedin_card_inside_recent_window_is_not_skipped() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_datetime: Some("2026-02-22".to_string()),
+        };
+        let now = Utc
+            .with_ymd_and_hms(2026, 2, 22, 12, 0, 0)
+            .single()
+            .unwrap();
+
+        let reason = linkedin_search_skip_reason(&base_filters(), &card, now);
+        assert!(reason.is_none());
+    }
 }

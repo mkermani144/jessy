@@ -31,6 +31,8 @@ impl SearchPageExtractor for LinkedInAdapter {
                     .map(|c| SearchCardData {
                         title: c.title,
                         job_url: c.job_url,
+                        footer_items: c.footer_items,
+                        posted_datetime: c.posted_datetime,
                     })
                     .collect(),
                 job_links: snapshot.job_links,

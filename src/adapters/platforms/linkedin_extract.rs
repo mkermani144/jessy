@@ -75,6 +75,10 @@ pub struct SearchCard {
     pub title: String,
     pub company_hint: Option<String>,
     pub job_url: String,
+    #[serde(default)]
+    pub footer_items: Vec<String>,
+    #[serde(default)]
+    pub posted_datetime: Option<String>,
     pub raw_text: String,
 }
 
@@ -197,11 +201,19 @@ const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
     const jobUrl = abs(jobAnchor.getAttribute('href') || '');
     if (!jobUrl || !isJobLike(jobUrl)) return null;
     const title = titleText(titleNode);
+    const footerItems = [...node.querySelectorAll('.job-card-container__footer-item')]
+      .map((el) => clean(el.innerText || el.textContent || ''))
+      .filter(Boolean)
+      .slice(0, 8);
+    const postedNode = node.querySelector('time[datetime]');
+    const postedDatetimeRaw = clean((postedNode && postedNode.getAttribute && postedNode.getAttribute('datetime')) || '');
 
     return {
       title,
       company_hint: null,
       job_url: jobUrl,
+      footer_items: footerItems,
+      posted_datetime: postedDatetimeRaw || null,
       raw_text: clean((node.innerText || '').slice(0, 1200)),
     };
   };

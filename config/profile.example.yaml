@@ -13,6 +13,7 @@ crawl:
   request_delay_ms: 1500
 
 filters:
+  recent_posted_within_hours: 24
   words_to_avoid_in_title:
     - intern
     - unpaid

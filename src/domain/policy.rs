@@ -176,6 +176,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
             skills_to_avoid: vec![],
+            recent_posted_within_hours: 24,
         };
 
         let decision = title_pre_match(&filters, "Software Engineer Intern");
@@ -187,6 +188,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             skills_to_avoid: vec![],
+            recent_posted_within_hours: 24,
         };
 
         let reason = hard_exclusion(
@@ -202,6 +204,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             skills_to_avoid: vec![],
+            recent_posted_within_hours: 24,
         };
 
         let reason = hard_exclusion(

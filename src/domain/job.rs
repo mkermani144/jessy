@@ -20,6 +20,8 @@ impl PlatformKind {
 pub struct SearchCardData {
     pub title: String,
     pub job_url: String,
+    pub footer_items: Vec<String>,
+    pub posted_datetime: Option<String>,
 }
 
 /// Parsed snapshot from a search/list page.
