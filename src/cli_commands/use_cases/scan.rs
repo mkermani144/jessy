@@ -1488,7 +1488,6 @@ mod tests {
     fn base_filters() -> crate::config::FiltersConfig {
         crate::config::FiltersConfig {
             words_to_avoid_in_title: vec![],
-            skills_to_avoid: vec![],
             recent_posted_within_hours: 24,
         }
     }

@@ -56,8 +56,6 @@ pub struct CrawlConfig {
 pub struct FiltersConfig {
     #[serde(default)]
     pub words_to_avoid_in_title: Vec<String>,
-    #[serde(default)]
-    pub skills_to_avoid: Vec<String>,
     #[serde(default = "default_recent_posted_within_hours")]
     pub recent_posted_within_hours: u64,
 }
@@ -124,7 +122,6 @@ impl AppConfig {
 
         self.filters.words_to_avoid_in_title =
             normalize_list(&self.filters.words_to_avoid_in_title);
-        self.filters.skills_to_avoid = normalize_list(&self.filters.skills_to_avoid);
 
         if let Some(v) = self.openai.api_key.take() {
             let trimmed = v.trim().to_string();

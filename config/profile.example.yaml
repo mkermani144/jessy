@@ -17,9 +17,6 @@ filters:
   words_to_avoid_in_title:
     - intern
     - unpaid
-  skills_to_avoid:
-    - dotnet
-    - java
 
 openai:
   base_url: https://api.openai.com/v1

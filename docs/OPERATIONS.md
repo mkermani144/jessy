@@ -34,7 +34,6 @@ File: `config/profile.yaml`
 - `crawl.stop_on_repeat_pages`: early stop on repeated fingerprint.
 - `crawl.request_delay_ms`: currently reserved (not used in runtime flow).
 - `filters.words_to_avoid_in_title`: cheap pre-open filter.
-- `filters.skills_to_avoid`: currently reserved (not used in runtime flow).
 - `openai.model`: model used by Rig/OpenAI structured extractor.
 - `retention.days`: automatic old-record cleanup window.
 - `storage.db_path`: SQLite location.

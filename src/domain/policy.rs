@@ -188,7 +188,6 @@ mod tests {
     fn blocks_title_with_avoided_word() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
-            skills_to_avoid: vec![],
             recent_posted_within_hours: 24,
         };
 
@@ -200,7 +199,6 @@ mod tests {
     fn hard_excludes_explicit_no_visa() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
-            skills_to_avoid: vec![],
             recent_posted_within_hours: 24,
         };
 
@@ -216,7 +214,6 @@ mod tests {
     fn does_not_exclude_when_visa_sponsored() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
-            skills_to_avoid: vec![],
             recent_posted_within_hours: 24,
         };
 
@@ -232,7 +229,6 @@ mod tests {
     fn does_not_block_partial_word_match_in_title() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
-            skills_to_avoid: vec![],
             recent_posted_within_hours: 24,
         };
 
@@ -244,7 +240,6 @@ mod tests {
     fn blocks_multi_word_phrase_when_words_are_contiguous() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["senior engineer".to_string()],
-            skills_to_avoid: vec![],
             recent_posted_within_hours: 24,
         };
 
