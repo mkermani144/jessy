@@ -33,6 +33,7 @@ File: `config/profile.yaml`
 - `crawl.max_pages_per_search_tab`: max page depth per search tab.
 - `crawl.stop_on_repeat_pages`: early stop on repeated fingerprint.
 - `crawl.request_delay_ms`: currently reserved (not used in runtime flow).
+- `filters.allowed_title_languages`: whitelist of detected title languages (programmatic detection).
 - `filters.words_to_avoid_in_title`: cheap pre-open filter.
 - `openai.model`: model used by Rig/OpenAI structured extractor.
 - `retention.days`: automatic old-record cleanup window.
@@ -51,6 +52,7 @@ Core run events:
 
 If `no_candidate_jobs_after_prefilter` appears:
 - verify the debug profile actually has job/search tabs open.
+- verify title language whitelist (`filters.allowed_title_languages`).
 - verify title prefilter (`filters.words_to_avoid_in_title`).
 - verify history state (`cleanup --reset-history` if needed).
 
