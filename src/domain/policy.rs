@@ -74,8 +74,21 @@ fn normalize_text(input: &str) -> String {
 }
 
 fn contains_phrase(haystack: &str, needle: &str) -> bool {
-    let n = normalize_text(needle);
-    !n.is_empty() && haystack.contains(&n)
+    let hay = normalize_text(haystack);
+    let needle_norm = normalize_text(needle);
+    if needle_norm.is_empty() {
+        return false;
+    }
+
+    let hay_tokens = hay.split_whitespace().collect::<Vec<_>>();
+    let needle_tokens = needle_norm.split_whitespace().collect::<Vec<_>>();
+    if needle_tokens.len() > hay_tokens.len() {
+        return false;
+    }
+
+    hay_tokens
+        .windows(needle_tokens.len())
+        .any(|window| window == needle_tokens.as_slice())
 }
 
 fn has_explicit_no_visa_or_sponsorship(text: &str) -> bool {
@@ -213,5 +226,29 @@ mod tests {
             &[],
         );
         assert!(reason.is_none());
+    }
+
+    #[test]
+    fn does_not_block_partial_word_match_in_title() {
+        let filters = FiltersConfig {
+            words_to_avoid_in_title: vec!["intern".to_string()],
+            skills_to_avoid: vec![],
+            recent_posted_within_hours: 24,
+        };
+
+        let decision = title_pre_match(&filters, "International Sales Manager");
+        assert!(decision.should_open_detail);
+    }
+
+    #[test]
+    fn blocks_multi_word_phrase_when_words_are_contiguous() {
+        let filters = FiltersConfig {
+            words_to_avoid_in_title: vec!["senior engineer".to_string()],
+            skills_to_avoid: vec![],
+            recent_posted_within_hours: 24,
+        };
+
+        let decision = title_pre_match(&filters, "Lead Senior Engineer Platform");
+        assert!(!decision.should_open_detail);
     }
 }
