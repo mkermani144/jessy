@@ -98,12 +98,13 @@ pub async fn upsert_job(pool: &SqlitePool, run_id: i64, job: &JobRecord) -> Resu
     let (job_id, is_new) = if let Some(row) = existing {
         let id: i64 = row.get("id");
         sqlx::query(
-            "UPDATE jobs SET canonical_url=?, company=?, title=?, location=?, work_mode=?, employment_type=?, posted_text=?, compensation_text=?, visa_policy_text=?, description=?, requirements_json=?, last_seen=?, source_tab_url=?, source_page_index=?, status=?, status_reason=?, requirements_summary=?, company_summary=?, company_size=? WHERE id=?",
+            "UPDATE jobs SET canonical_url=?, company=?, title=?, location=?, language=?, work_mode=?, employment_type=?, posted_text=?, compensation_text=?, visa_policy_text=?, description=?, requirements_json=?, last_seen=?, source_tab_url=?, source_page_index=?, status=?, status_reason=?, requirements_summary=?, company_summary=?, company_size=? WHERE id=?",
         )
         .bind(&job.canonical_url)
         .bind(&job.company)
         .bind(&job.title)
         .bind(&job.location)
+        .bind(&job.language)
         .bind(&job.work_mode)
         .bind(&job.employment_type)
         .bind(&job.posted_text)
@@ -126,13 +127,14 @@ pub async fn upsert_job(pool: &SqlitePool, run_id: i64, job: &JobRecord) -> Resu
         (id, false)
     } else {
         let rec = sqlx::query(
-            "INSERT INTO jobs (dedupe_key, canonical_url, company, title, location, work_mode, employment_type, posted_text, compensation_text, visa_policy_text, description, requirements_json, first_seen, last_seen, source_tab_url, source_page_index, status, status_reason, requirements_summary, company_summary, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO jobs (dedupe_key, canonical_url, company, title, location, language, work_mode, employment_type, posted_text, compensation_text, visa_policy_text, description, requirements_json, first_seen, last_seen, source_tab_url, source_page_index, status, status_reason, requirements_summary, company_summary, company_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&job.dedupe_key)
         .bind(&job.canonical_url)
         .bind(&job.company)
         .bind(&job.title)
         .bind(&job.location)
+        .bind(&job.language)
         .bind(&job.work_mode)
         .bind(&job.employment_type)
         .bind(&job.posted_text)
@@ -181,7 +183,7 @@ pub async fn upsert_job(pool: &SqlitePool, run_id: i64, job: &JobRecord) -> Resu
 
 pub async fn load_report_rows(pool: &SqlitePool, run_id: i64) -> Result<Vec<ReportRow>> {
     let rows = sqlx::query(
-        "SELECT j.title, j.company, j.canonical_url, j.status, j.status_reason, j.location, j.work_mode, j.employment_type, j.posted_text, j.compensation_text, j.visa_policy_text, j.description, j.requirements_json, j.company_summary, j.company_size FROM run_job_results r JOIN jobs j ON j.id = r.job_id WHERE r.run_id = ? ORDER BY r.id ASC",
+        "SELECT j.title, j.company, j.canonical_url, j.status, j.status_reason, j.location, j.language, j.work_mode, j.employment_type, j.posted_text, j.compensation_text, j.visa_policy_text, j.description, j.requirements_json, j.company_summary, j.company_size FROM run_job_results r JOIN jobs j ON j.id = r.job_id WHERE r.run_id = ? ORDER BY r.id ASC",
     )
     .bind(run_id)
     .fetch_all(pool)
@@ -201,6 +203,7 @@ pub async fn load_report_rows(pool: &SqlitePool, run_id: i64) -> Result<Vec<Repo
             status: row.get("status"),
             summary: row.get("status_reason"),
             location: row.get("location"),
+            language: row.get("language"),
             work_mode: row.get("work_mode"),
             employment_type: row.get("employment_type"),
             posted_text: row.get("posted_text"),

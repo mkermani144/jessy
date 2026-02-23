@@ -10,6 +10,7 @@ Use concise keyword-style values for all free-text fields:
 - description: compact role keywords/tags only.
 - company_summary: compact company keywords/tags only.
 - location_text, compensation_text: short keyword phrases.
+Set language to lowercase ISO-639-1 when inferable from content (e.g. en, de, fr), else null.
 For visa_policy_text use one of: visa_sponsored, unknown, visa_not_sponsored.
 For company_size_text use one of: 1-10, 11-50, 51-500, above.
 Keep phrases terse and scannable.

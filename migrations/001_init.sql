@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     company TEXT NOT NULL,
     title TEXT NOT NULL,
     location TEXT,
+    language TEXT,
     work_mode TEXT,
     employment_type TEXT,
     posted_text TEXT,

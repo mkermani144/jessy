@@ -13,7 +13,7 @@ It uses:
 - Reads open tabs from the dedicated debug Chrome profile (assumed job-related).
 - Crawls search pages up to N pages with repeat-page stop.
 - Runs title prefilter with `filters.words_to_avoid_in_title` before opening detail tabs.
-- Extracts one `aboutTheJob` DOM element per candidate and asks AI for structured fields.
+- Extracts one `aboutTheJob` DOM element per candidate and asks AI for structured fields (including language).
 - Applies deterministic hard exclusions (visa/residency); hard-excluded jobs become `not_opportunity`, others become `opportunity`.
 - Stores history in SQLite to avoid repeated work.
 - Prints verbose terminal cards.

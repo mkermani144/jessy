@@ -56,8 +56,6 @@ pub struct CrawlConfig {
 pub struct FiltersConfig {
     #[serde(default)]
     pub words_to_avoid_in_title: Vec<String>,
-    #[serde(default)]
-    pub allowed_title_languages: Vec<String>,
     #[serde(default = "default_recent_posted_within_days")]
     pub recent_posted_within_days: u64,
 }
@@ -124,8 +122,6 @@ impl AppConfig {
 
         self.filters.words_to_avoid_in_title =
             normalize_list(&self.filters.words_to_avoid_in_title);
-        self.filters.allowed_title_languages =
-            normalize_language_codes(&self.filters.allowed_title_languages);
 
         if let Some(v) = self.openai.api_key.take() {
             let trimmed = v.trim().to_string();
@@ -203,28 +199,6 @@ fn normalize_urls(items: &[String]) -> Vec<String> {
     out
 }
 
-fn normalize_language_codes(items: &[String]) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-
-    for item in items {
-        let normalized = normalize_language_code(item);
-        if !normalized.is_empty() && seen.insert(normalized.clone()) {
-            out.push(normalized);
-        }
-    }
-
-    out
-}
-
-fn normalize_language_code(item: &str) -> String {
-    match item.trim().to_ascii_lowercase().as_str() {
-        "en" | "eng" | "english" => "eng".to_string(),
-        "de" | "deu" | "ger" | "german" => "deu".to_string(),
-        other => other.to_string(),
-    }
-}
-
 const fn default_true() -> bool {
     true
 }
@@ -288,16 +262,5 @@ mod tests {
             "".to_string(),
         ]);
         assert_eq!(out, vec!["linkedin.com"]);
-    }
-
-    #[test]
-    fn normalizes_language_aliases() {
-        let out = normalize_language_codes(&[
-            "EN".to_string(),
-            "english".to_string(),
-            "de".to_string(),
-            "GER".to_string(),
-        ]);
-        assert_eq!(out, vec!["eng", "deu"]);
     }
 }

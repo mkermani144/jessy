@@ -62,6 +62,7 @@ pub struct AiDecision {
     pub title: Option<String>,
     pub company_name: Option<String>,
     pub location_text: Option<String>,
+    pub language: Option<String>,
     pub work_mode: Option<WorkMode>,
     pub employment_type: Option<EmploymentType>,
     pub description: Option<String>,
@@ -78,6 +79,7 @@ impl AiDecision {
         self.title = normalize_opt(self.title.take());
         self.company_name = normalize_opt(self.company_name.take());
         self.location_text = normalize_opt(self.location_text.take());
+        self.language = normalize_language_opt(self.language.take());
         self.description = normalize_opt(self.description.take());
         self.compensation_text = normalize_opt(self.compensation_text.take());
         self.company_summary = normalize_opt(self.company_summary.take());
@@ -114,4 +116,8 @@ fn normalize_list(values: Vec<String>) -> Vec<String> {
         }
     }
     out
+}
+
+fn normalize_language_opt(value: Option<String>) -> Option<String> {
+    normalize_opt(value).map(|v| v.to_ascii_lowercase())
 }

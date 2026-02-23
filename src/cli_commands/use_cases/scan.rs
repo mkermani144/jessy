@@ -302,6 +302,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                                 status: "not_opportunity".to_string(),
                                 summary: format!("Rejected at prefilter: {}", reason),
                                 location: None,
+                                language: None,
                                 work_mode: None,
                                 employment_type: None,
                                 posted_text: None,
@@ -336,32 +337,11 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
             } else {
                 card.title.clone()
             };
-            if pre_match.reason.starts_with("title_language_") {
-                if let Some(detected) = policy::detect_title_language(&card.title) {
-                    info!(
-                        event = "dev_prefilter_skip_card",
-                        reason = %pre_match.reason,
-                        title = %title,
-                        language = %detected.code,
-                        language_confidence = detected.confidence,
-                        language_reliable = detected.is_reliable,
-                        language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
-                    );
-                } else {
-                    info!(
-                        event = "dev_prefilter_skip_card",
-                        reason = %pre_match.reason,
-                        title = %title,
-                        language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
-                    );
-                }
-            } else {
-                info!(
-                    event = "dev_prefilter_skip_card",
-                    reason = %pre_match.reason,
-                    title = %title
-                );
-            }
+            info!(
+                event = "dev_prefilter_skip_card",
+                reason = %pre_match.reason,
+                title = %title
+            );
             rows.push((
                 idx,
                 ReportRow {
@@ -371,6 +351,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                     status: "not_opportunity".to_string(),
                     summary: format!("Rejected at prefilter: {}", pre_match.reason),
                     location: None,
+                    language: None,
                     work_mode: None,
                     employment_type: None,
                     posted_text: None,
@@ -440,6 +421,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                             sanitize_error_message(&err.to_string())
                         ),
                         location: None,
+                        language: None,
                         work_mode: None,
                         employment_type: None,
                         posted_text: None,
@@ -719,35 +701,12 @@ async fn scan_search_tab(
                 } else {
                     card.title.clone()
                 };
-                if decision.reason.starts_with("title_language_") {
-                    if let Some(detected) = policy::detect_title_language(&card.title) {
-                        info!(
-                            event = "prefilter_skip_card",
-                            page_index = idx,
-                            reason = %decision.reason,
-                            title = %title,
-                            language = %detected.code,
-                            language_confidence = detected.confidence,
-                            language_reliable = detected.is_reliable,
-                            language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
-                        );
-                    } else {
-                        info!(
-                            event = "prefilter_skip_card",
-                            page_index = idx,
-                            reason = %decision.reason,
-                            title = %title,
-                            language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
-                        );
-                    }
-                } else {
-                    info!(
-                        event = "prefilter_skip_card",
-                        page_index = idx,
-                        reason = %decision.reason,
-                        title = %title
-                    );
-                }
+                info!(
+                    event = "prefilter_skip_card",
+                    page_index = idx,
+                    reason = %decision.reason,
+                    title = %title
+                );
                 continue;
             }
             if card.title.trim().is_empty() {
@@ -950,6 +909,7 @@ async fn process_opened_tab(
         .await
         .context("ai extraction failed")?
         .sanitized();
+    let language_text = ai_decision.language.clone();
     let work_mode_text = ai_decision.work_mode.as_ref().map(work_mode_to_string);
     let compensation_text = ai_decision.compensation_text.clone();
     let visa_policy_text = ai_decision
@@ -1021,6 +981,7 @@ async fn process_opened_tab(
             company: extraction.company.clone(),
             title: extraction.title.clone(),
             location: extraction.location.clone(),
+            language: language_text.clone(),
             work_mode: work_mode_text.clone(),
             employment_type: extraction.employment_type.clone(),
             posted_text: extraction.posted_text.clone(),
@@ -1063,6 +1024,7 @@ async fn process_opened_tab(
         company: extraction.company,
         title: extraction.title,
         location: extraction.location,
+        language: language_text,
         work_mode: work_mode_text,
         employment_type: extraction.employment_type,
         posted_text: extraction.posted_text,
@@ -1126,6 +1088,7 @@ async fn process_opened_tab_dev(
         .await
         .context("ai extraction failed")?
         .sanitized();
+    let language_text = ai_decision.language.clone();
     let work_mode_text = ai_decision.work_mode.as_ref().map(work_mode_to_string);
     let compensation_text = ai_decision.compensation_text.clone();
     let visa_policy_text = ai_decision
@@ -1193,6 +1156,7 @@ async fn process_opened_tab_dev(
             status: "not_opportunity".to_string(),
             summary: format!("Rejected: hard exclusion ({hard_reason})"),
             location: extraction.location,
+            language: language_text.clone(),
             work_mode: work_mode_text,
             employment_type: extraction.employment_type,
             posted_text: extraction.posted_text,
@@ -1218,6 +1182,7 @@ async fn process_opened_tab_dev(
         status: "opportunity".to_string(),
         summary,
         location: extraction.location,
+        language: language_text,
         work_mode: work_mode_text,
         employment_type: extraction.employment_type,
         posted_text: extraction.posted_text,
@@ -1718,7 +1683,6 @@ mod tests {
     fn filters_with_recent_days(days: u64) -> crate::config::FiltersConfig {
         crate::config::FiltersConfig {
             words_to_avoid_in_title: vec![],
-            allowed_title_languages: vec![],
             recent_posted_within_days: days,
         }
     }

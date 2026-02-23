@@ -1,27 +1,4 @@
 use crate::config::FiltersConfig;
-use whatlang::detect;
-
-const TITLE_LANGUAGE_RELIABLE_CONFIDENCE_THRESHOLD: f64 = 0.9;
-
-#[derive(Debug, Clone)]
-pub struct TitleLanguageDetection {
-    pub code: String,
-    pub confidence: f64,
-    pub is_reliable: bool,
-}
-
-pub const fn title_language_reliable_confidence_threshold() -> f64 {
-    TITLE_LANGUAGE_RELIABLE_CONFIDENCE_THRESHOLD
-}
-
-pub fn detect_title_language(title: &str) -> Option<TitleLanguageDetection> {
-    let info = detect(title)?;
-    Some(TitleLanguageDetection {
-        code: format!("{:?}", info.lang()).to_ascii_lowercase(),
-        confidence: info.confidence(),
-        is_reliable: info.is_reliable(),
-    })
-}
 
 /// Decision returned by lightweight title pre-filtering.
 #[derive(Debug, Clone)]
@@ -65,13 +42,6 @@ pub fn title_pre_match(filters: &FiltersConfig, title: &str) -> PreMatchDecision
         };
     }
 
-    if let Some(reason) = language_pre_match(filters, title) {
-        return PreMatchDecision {
-            should_open_detail: false,
-            reason,
-        };
-    }
-
     for blocked in &filters.words_to_avoid_in_title {
         if contains_phrase(&normalized_title, blocked) {
             return PreMatchDecision {
@@ -85,26 +55,6 @@ pub fn title_pre_match(filters: &FiltersConfig, title: &str) -> PreMatchDecision
         should_open_detail: true,
         reason: "title_allowed".to_string(),
     }
-}
-
-fn language_pre_match(filters: &FiltersConfig, title: &str) -> Option<String> {
-    if filters.allowed_title_languages.is_empty() {
-        return None;
-    }
-
-    let detected = detect_title_language(title);
-    if let Some(detection) = detected {
-        if !filters
-            .allowed_title_languages
-            .iter()
-            .any(|allowed| allowed == &detection.code)
-        {
-            return Some(format!("title_language_not_allowed:{}", detection.code));
-        }
-        return None;
-    }
-
-    Some("title_language_unknown_not_allowed".to_string())
 }
 
 fn normalize_text(input: &str) -> String {
@@ -238,7 +188,6 @@ mod tests {
     fn blocks_title_with_avoided_word() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
-            allowed_title_languages: vec![],
             recent_posted_within_days: 1,
         };
 
@@ -250,7 +199,6 @@ mod tests {
     fn hard_excludes_explicit_no_visa() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
-            allowed_title_languages: vec![],
             recent_posted_within_days: 1,
         };
 
@@ -266,7 +214,6 @@ mod tests {
     fn does_not_exclude_when_visa_sponsored() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
-            allowed_title_languages: vec![],
             recent_posted_within_days: 1,
         };
 
@@ -282,7 +229,6 @@ mod tests {
     fn does_not_block_partial_word_match_in_title() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
-            allowed_title_languages: vec![],
             recent_posted_within_days: 1,
         };
 
@@ -294,7 +240,6 @@ mod tests {
     fn blocks_multi_word_phrase_when_words_are_contiguous() {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["senior engineer".to_string()],
-            allowed_title_languages: vec![],
             recent_posted_within_days: 1,
         };
 
@@ -302,47 +247,4 @@ mod tests {
         assert!(!decision.should_open_detail);
     }
 
-    #[test]
-    fn blocks_language_when_not_in_allowed_list() {
-        let filters = FiltersConfig {
-            words_to_avoid_in_title: vec![],
-            allowed_title_languages: vec!["eng".to_string()],
-            recent_posted_within_days: 1,
-        };
-
-        let decision = title_pre_match(
-            &filters,
-            "Senior Softwareentwickler für Plattform und Daten mit Erfahrung in verteilten Systemen",
-        );
-        assert!(!decision.should_open_detail);
-        assert!(decision.reason.starts_with("title_language_not_allowed:"));
-    }
-
-    #[test]
-    fn allows_language_when_in_allowed_list() {
-        let filters = FiltersConfig {
-            words_to_avoid_in_title: vec![],
-            allowed_title_languages: vec!["eng".to_string()],
-            recent_posted_within_days: 1,
-        };
-
-        let decision = title_pre_match(
-            &filters,
-            "Senior software engineer with experience in distributed systems and backend services",
-        );
-        assert!(decision.should_open_detail);
-    }
-
-    #[test]
-    fn blocks_unknown_language_when_whitelist_is_enabled() {
-        let filters = FiltersConfig {
-            words_to_avoid_in_title: vec![],
-            allowed_title_languages: vec!["eng".to_string()],
-            recent_posted_within_days: 1,
-        };
-
-        let decision = title_pre_match(&filters, "//// ???? 12345");
-        assert!(!decision.should_open_detail);
-        assert_eq!(decision.reason, "title_language_unknown_not_allowed");
-    }
 }

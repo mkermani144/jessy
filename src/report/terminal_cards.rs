@@ -74,6 +74,7 @@ fn print_card(row: &ReportRow, width: usize) {
 
     print_kv_opt("Company", row.company.as_deref(), inner);
     print_kv_opt("Location", row.location.as_deref(), inner);
+    print_kv_opt("Language", row.language.as_deref(), inner);
     print_kv_opt("Work Mode", row.work_mode.as_deref(), inner);
     print_kv_opt("Employment Type", row.employment_type.as_deref(), inner);
     print_kv_opt("Posted", row.posted_text.as_deref(), inner);

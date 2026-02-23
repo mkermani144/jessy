@@ -14,9 +14,6 @@ crawl:
 
 filters:
   recent_posted_within_days: 1
-  # Accepts ISO-639-1/3 aliases (e.g. en/eng).
-  allowed_title_languages:
-    - en
   words_to_avoid_in_title:
     - intern
     - unpaid

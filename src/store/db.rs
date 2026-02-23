@@ -46,6 +46,7 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
     }
 
     ensure_jobs_column(pool, "work_mode", "TEXT").await?;
+    ensure_jobs_column(pool, "language", "TEXT").await?;
     ensure_jobs_column(pool, "compensation_text", "TEXT").await?;
     ensure_jobs_column(pool, "visa_policy_text", "TEXT").await?;
 
