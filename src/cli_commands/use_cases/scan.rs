@@ -70,6 +70,12 @@ struct JobSeed {
     pre_match_reason: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SearchCardPrefilterAction {
+    Skip { reason: String },
+    TerminateTab { reason: String },
+}
+
 #[tracing::instrument(
     name = "scan",
     skip_all,
@@ -243,40 +249,55 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
     let mut rows: Vec<(usize, ReportRow)> = Vec::new();
     let mut seeds: Vec<(usize, JobSeed)> = Vec::new();
 
+    let mut terminated_reason: Option<String> = None;
     for (idx, card) in cards.into_iter().enumerate() {
         if is_linkedin {
-            if let Some(reason) = linkedin_search_skip_reason(&cfg.filters, &card) {
+            if let Some(action) = linkedin_prefilter_action(&cfg.filters, &card) {
                 let title = if card.title.trim().is_empty() {
                     "Unknown title".to_string()
                 } else {
                     card.title.clone()
                 };
-                info!(
-                    event = "dev_prefilter_skip_card",
-                    reason = %reason,
-                    title = %title
-                );
-                rows.push((
-                    idx,
-                    ReportRow {
-                        title,
-                        company: None,
-                        canonical_url: job_page::canonicalize_url(&card.job_url),
-                        status: "not_opportunity".to_string(),
-                        summary: format!("Rejected at prefilter: {}", reason),
-                        location: None,
-                        work_mode: None,
-                        employment_type: None,
-                        posted_text: None,
-                        compensation_text: None,
-                        visa_policy_text: None,
-                        description: None,
-                        company_summary: None,
-                        company_size: None,
-                        requirements: vec![],
-                    },
-                ));
-                continue;
+                match action {
+                    SearchCardPrefilterAction::Skip { reason } => {
+                        info!(
+                            event = "dev_prefilter_skip_card",
+                            reason = %reason,
+                            title = %title
+                        );
+                        rows.push((
+                            idx,
+                            ReportRow {
+                                title,
+                                company: None,
+                                canonical_url: job_page::canonicalize_url(&card.job_url),
+                                status: "not_opportunity".to_string(),
+                                summary: format!("Rejected at prefilter: {}", reason),
+                                location: None,
+                                work_mode: None,
+                                employment_type: None,
+                                posted_text: None,
+                                compensation_text: None,
+                                visa_policy_text: None,
+                                description: None,
+                                company_summary: None,
+                                company_size: None,
+                                requirements: vec![],
+                            },
+                        ));
+                        continue;
+                    }
+                    SearchCardPrefilterAction::TerminateTab { reason } => {
+                        info!(
+                            event = "dev_prefilter_terminate_tab",
+                            reason = %reason,
+                            title = %title,
+                            page_index = 1
+                        );
+                        terminated_reason = Some(reason);
+                        break;
+                    }
+                }
             }
         }
 
@@ -352,6 +373,8 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
             },
         ));
     }
+
+    let _ = terminated_reason;
 
     let worker_count = usize::min(DEFAULT_SEED_WORKERS, usize::max(1, seeds.len()));
     info!(
@@ -613,23 +636,38 @@ async fn scan_search_tab(
         let mut skipped_linkedin_prefilter = 0usize;
         let mut forced_open_no_title = 0usize;
         let mut stop_on_seen_job = false;
+        let mut terminate_tab_reason: Option<String> = None;
 
         for card in cards {
             if is_linkedin {
-                if let Some(reason) = linkedin_search_skip_reason(&cfg.filters, &card) {
-                    skipped_linkedin_prefilter += 1;
+                if let Some(action) = linkedin_prefilter_action(&cfg.filters, &card) {
                     let title = if card.title.trim().is_empty() {
                         "Unknown title".to_string()
                     } else {
                         card.title.clone()
                     };
-                    info!(
-                        event = "prefilter_skip_card",
-                        page_index = idx,
-                        reason = %reason,
-                        title = %title
-                    );
-                    continue;
+                    match action {
+                        SearchCardPrefilterAction::Skip { reason } => {
+                            skipped_linkedin_prefilter += 1;
+                            info!(
+                                event = "prefilter_skip_card",
+                                page_index = idx,
+                                reason = %reason,
+                                title = %title
+                            );
+                            continue;
+                        }
+                        SearchCardPrefilterAction::TerminateTab { reason } => {
+                            info!(
+                                event = "prefilter_terminate_tab",
+                                page_index = idx,
+                                reason = %reason,
+                                title = %title
+                            );
+                            terminate_tab_reason = Some(reason);
+                            break;
+                        }
+                    }
                 }
             }
 
@@ -712,14 +750,30 @@ async fn scan_search_tab(
             skipped_linkedin_prefilter,
             skipped_title,
             forced_open_no_title,
-            stop_on_seen_job
+            stop_on_seen_job,
+            terminate_tab = terminate_tab_reason.is_some()
         );
 
         if stop_on_seen_job {
+            info!(
+                event = "terminate_tab",
+                page_index = idx,
+                reason = "seen_job_in_history"
+            );
+            break;
+        }
+
+        if terminate_tab_reason.is_some() {
             break;
         }
 
         if idx >= cfg.crawl.max_pages_per_search_tab {
+            info!(
+                event = "terminate_tab",
+                page_index = idx,
+                reason = "page_threshold_reached",
+                max_pages = cfg.crawl.max_pages_per_search_tab
+            );
             break;
         }
 
@@ -731,6 +785,11 @@ async fn scan_search_tab(
                 mode = "click_only"
             );
         } else {
+            info!(
+                event = "terminate_tab",
+                page_index = idx,
+                reason = "no_next_page"
+            );
             break;
         }
     }
@@ -1424,22 +1483,28 @@ fn is_search_snapshot_usable(snapshot: &crate::domain::job::SearchPageData) -> b
     !(snapshot.job_cards.is_empty() && snapshot.job_links.is_empty())
 }
 
-fn linkedin_search_skip_reason(
+fn linkedin_prefilter_action(
     filters: &crate::config::FiltersConfig,
     card: &crate::domain::job::SearchCardData,
-) -> Option<String> {
+) -> Option<SearchCardPrefilterAction> {
     let Some(posted_age_text) = card.posted_age_text.as_deref() else {
-        return Some("linkedin_posted_age_missing".to_string());
+        return Some(SearchCardPrefilterAction::Skip {
+            reason: "linkedin_posted_age_missing".to_string(),
+        });
     };
     if posted_age_text.trim().is_empty() {
-        return Some("linkedin_posted_age_missing".to_string());
+        return Some(SearchCardPrefilterAction::Skip {
+            reason: "linkedin_posted_age_missing".to_string(),
+        });
     }
 
     if !is_posted_age_within_limit(posted_age_text, filters.recent_posted_within_days) {
-        return Some(format!(
-            "linkedin_posted_not_less_than_{}d",
-            filters.recent_posted_within_days
-        ));
+        return Some(SearchCardPrefilterAction::TerminateTab {
+            reason: format!(
+                "linkedin_posted_not_less_than_{}d",
+                filters.recent_posted_within_days
+            ),
+        });
     }
 
     None
@@ -1610,8 +1675,13 @@ mod tests {
             posted_age_text: Some("2 days ago".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
-        assert_eq!(reason.as_deref(), Some("linkedin_posted_not_less_than_2d"));
+        let action = linkedin_prefilter_action(&filters_with_recent_days(2), &card);
+        assert_eq!(
+            action,
+            Some(SearchCardPrefilterAction::TerminateTab {
+                reason: "linkedin_posted_not_less_than_2d".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1623,8 +1693,13 @@ mod tests {
             posted_age_text: None,
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
-        assert_eq!(reason.as_deref(), Some("linkedin_posted_age_missing"));
+        let action = linkedin_prefilter_action(&filters_with_recent_days(2), &card);
+        assert_eq!(
+            action,
+            Some(SearchCardPrefilterAction::Skip {
+                reason: "linkedin_posted_age_missing".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1636,8 +1711,13 @@ mod tests {
             posted_age_text: Some("   ".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
-        assert_eq!(reason.as_deref(), Some("linkedin_posted_age_missing"));
+        let action = linkedin_prefilter_action(&filters_with_recent_days(2), &card);
+        assert_eq!(
+            action,
+            Some(SearchCardPrefilterAction::Skip {
+                reason: "linkedin_posted_age_missing".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1649,8 +1729,8 @@ mod tests {
             posted_age_text: Some("1 day ago".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
-        assert!(reason.is_none());
+        let action = linkedin_prefilter_action(&filters_with_recent_days(2), &card);
+        assert!(action.is_none());
     }
 
     #[test]
@@ -1662,8 +1742,8 @@ mod tests {
             posted_age_text: Some("16 hours ago".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(1), &card);
-        assert!(reason.is_none());
+        let action = linkedin_prefilter_action(&filters_with_recent_days(1), &card);
+        assert!(action.is_none());
     }
 
     #[test]
@@ -1675,8 +1755,13 @@ mod tests {
             posted_age_text: Some("1 day ago".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(1), &card);
-        assert_eq!(reason.as_deref(), Some("linkedin_posted_not_less_than_1d"));
+        let action = linkedin_prefilter_action(&filters_with_recent_days(1), &card);
+        assert_eq!(
+            action,
+            Some(SearchCardPrefilterAction::TerminateTab {
+                reason: "linkedin_posted_not_less_than_1d".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1688,8 +1773,13 @@ mod tests {
             posted_age_text: Some("Yesterday".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(1), &card);
-        assert_eq!(reason.as_deref(), Some("linkedin_posted_not_less_than_1d"));
+        let action = linkedin_prefilter_action(&filters_with_recent_days(1), &card);
+        assert_eq!(
+            action,
+            Some(SearchCardPrefilterAction::TerminateTab {
+                reason: "linkedin_posted_not_less_than_1d".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1701,7 +1791,7 @@ mod tests {
             posted_age_text: Some("Yesterday".to_string()),
         };
 
-        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
-        assert!(reason.is_none());
+        let action = linkedin_prefilter_action(&filters_with_recent_days(2), &card);
+        assert!(action.is_none());
     }
 }
