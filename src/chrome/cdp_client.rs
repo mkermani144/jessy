@@ -99,7 +99,11 @@ impl CdpClient {
             .map(|u| u.to_string())
             .unwrap_or_else(|_| url.to_string());
 
-        let endpoint = format!("{}/json/new?{}", self.debug_endpoint, encoded);
+        let endpoint = format!(
+            "{}/json/new?{}",
+            self.debug_endpoint,
+            urlencoding::encode(&encoded)
+        );
         let response = self
             .http
             .put(endpoint)
