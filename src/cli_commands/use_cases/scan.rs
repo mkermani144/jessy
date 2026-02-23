@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::Utc;
 use futures_util::stream::{self, StreamExt};
 use sha2::{Digest, Sha256};
 use tracing::{debug, info, info_span, warn, Instrument};
@@ -233,7 +233,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                 title: String::new(),
                 job_url: job_url.clone(),
                 footer_items: Vec::new(),
-                posted_datetime: None,
+                posted_age_text: None,
             })
             .collect::<Vec<_>>()
     } else {
@@ -242,29 +242,81 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
 
     let mut rows: Vec<(usize, ReportRow)> = Vec::new();
     let mut seeds: Vec<(usize, JobSeed)> = Vec::new();
-    if is_linkedin {
-        let now = Utc::now();
-        if let Some(reason) = cards
-            .iter()
-            .find_map(|card| linkedin_search_skip_reason(&cfg.filters, card, now))
-        {
-            info!(event = "dev_stop_linkedin_tab_prefilter", reason = %reason);
-            println!("Dev scan skipped: LinkedIn tab rejected at prefilter ({reason}).");
-            return Ok(());
-        }
-    }
 
     for (idx, card) in cards.into_iter().enumerate() {
+        if is_linkedin {
+            if let Some(reason) = linkedin_search_skip_reason(&cfg.filters, &card) {
+                let title = if card.title.trim().is_empty() {
+                    "Unknown title".to_string()
+                } else {
+                    card.title.clone()
+                };
+                info!(
+                    event = "dev_prefilter_skip_card",
+                    reason = %reason,
+                    title = %title
+                );
+                rows.push((
+                    idx,
+                    ReportRow {
+                        title,
+                        company: None,
+                        canonical_url: job_page::canonicalize_url(&card.job_url),
+                        status: "not_opportunity".to_string(),
+                        summary: format!("Rejected at prefilter: {}", reason),
+                        location: None,
+                        work_mode: None,
+                        employment_type: None,
+                        posted_text: None,
+                        compensation_text: None,
+                        visa_policy_text: None,
+                        description: None,
+                        company_summary: None,
+                        company_size: None,
+                        requirements: vec![],
+                    },
+                ));
+                continue;
+            }
+        }
+
         let pre_match = policy::title_pre_match(&cfg.filters, &card.title);
         if !pre_match.should_open_detail {
+            let title = if card.title.trim().is_empty() {
+                "Unknown title".to_string()
+            } else {
+                card.title.clone()
+            };
+            if pre_match.reason.starts_with("title_language_") {
+                if let Some(detected) = policy::detect_title_language(&card.title) {
+                    info!(
+                        event = "dev_prefilter_skip_card",
+                        reason = %pre_match.reason,
+                        title = %title,
+                        language = %detected.code,
+                        language_confidence = detected.confidence,
+                        language_reliable = detected.is_reliable,
+                        language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
+                    );
+                } else {
+                    info!(
+                        event = "dev_prefilter_skip_card",
+                        reason = %pre_match.reason,
+                        title = %title,
+                        language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
+                    );
+                }
+            } else {
+                info!(
+                    event = "dev_prefilter_skip_card",
+                    reason = %pre_match.reason,
+                    title = %title
+                );
+            }
             rows.push((
                 idx,
                 ReportRow {
-                    title: if card.title.trim().is_empty() {
-                        "Unknown title".to_string()
-                    } else {
-                        card.title.clone()
-                    },
+                    title,
                     company: None,
                     canonical_url: job_page::canonicalize_url(&card.job_url),
                     status: "not_opportunity".to_string(),
@@ -547,35 +599,40 @@ async fn scan_search_tab(
                     title: String::new(),
                     job_url: job_url.clone(),
                     footer_items: Vec::new(),
-                    posted_datetime: None,
+                    posted_age_text: None,
                 })
                 .collect::<Vec<_>>()
         } else {
             snapshot.job_cards.clone()
         };
-        if is_linkedin {
-            let now = Utc::now();
-            if let Some(reason) = cards
-                .iter()
-                .find_map(|card| linkedin_search_skip_reason(&cfg.filters, card, now))
-            {
-                info!(
-                    event = "stop_linkedin_tab_prefilter",
-                    page_index = idx,
-                    reason = %reason
-                );
-                return Ok(Vec::new());
-            }
-        }
 
         let total_cards = cards.len();
         let mut queued = 0usize;
         let mut skipped_seen = 0usize;
         let mut skipped_title = 0usize;
+        let mut skipped_linkedin_prefilter = 0usize;
         let mut forced_open_no_title = 0usize;
         let mut stop_on_seen_job = false;
 
         for card in cards {
+            if is_linkedin {
+                if let Some(reason) = linkedin_search_skip_reason(&cfg.filters, &card) {
+                    skipped_linkedin_prefilter += 1;
+                    let title = if card.title.trim().is_empty() {
+                        "Unknown title".to_string()
+                    } else {
+                        card.title.clone()
+                    };
+                    info!(
+                        event = "prefilter_skip_card",
+                        page_index = idx,
+                        reason = %reason,
+                        title = %title
+                    );
+                    continue;
+                }
+            }
+
             let canonical = job_page::canonicalize_url(&card.job_url);
             if deps.storage.is_canonical_url_seen(&canonical).await? {
                 skipped_seen += 1;
@@ -591,6 +648,40 @@ async fn scan_search_tab(
             let decision = policy::title_pre_match(&cfg.filters, &card.title);
             if !decision.should_open_detail {
                 skipped_title += 1;
+                let title = if card.title.trim().is_empty() {
+                    "Unknown title".to_string()
+                } else {
+                    card.title.clone()
+                };
+                if decision.reason.starts_with("title_language_") {
+                    if let Some(detected) = policy::detect_title_language(&card.title) {
+                        info!(
+                            event = "prefilter_skip_card",
+                            page_index = idx,
+                            reason = %decision.reason,
+                            title = %title,
+                            language = %detected.code,
+                            language_confidence = detected.confidence,
+                            language_reliable = detected.is_reliable,
+                            language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
+                        );
+                    } else {
+                        info!(
+                            event = "prefilter_skip_card",
+                            page_index = idx,
+                            reason = %decision.reason,
+                            title = %title,
+                            language_confidence_threshold = policy::title_language_reliable_confidence_threshold()
+                        );
+                    }
+                } else {
+                    info!(
+                        event = "prefilter_skip_card",
+                        page_index = idx,
+                        reason = %decision.reason,
+                        title = %title
+                    );
+                }
                 continue;
             }
             if card.title.trim().is_empty() {
@@ -618,6 +709,7 @@ async fn scan_search_tab(
             cards = total_cards,
             queued,
             skipped_seen,
+            skipped_linkedin_prefilter,
             skipped_title,
             forced_open_no_title,
             stop_on_seen_job
@@ -1335,61 +1427,77 @@ fn is_search_snapshot_usable(snapshot: &crate::domain::job::SearchPageData) -> b
 fn linkedin_search_skip_reason(
     filters: &crate::config::FiltersConfig,
     card: &crate::domain::job::SearchCardData,
-    now: DateTime<Utc>,
 ) -> Option<String> {
-    if card
-        .footer_items
-        .iter()
-        .any(|item| item.trim().eq_ignore_ascii_case("viewed"))
-    {
-        return Some("linkedin_card_already_viewed".to_string());
+    let Some(posted_age_text) = card.posted_age_text.as_deref() else {
+        return Some("linkedin_posted_age_missing".to_string());
+    };
+    if posted_age_text.trim().is_empty() {
+        return Some("linkedin_posted_age_missing".to_string());
     }
 
-    if let Some(posted_datetime) = card.posted_datetime.as_deref() {
-        if is_posted_datetime_stale(posted_datetime, filters.recent_posted_within_hours, now) {
-            return Some(format!(
-                "linkedin_posted_older_than_{}h",
-                filters.recent_posted_within_hours
-            ));
-        }
+    if !is_posted_age_within_limit(posted_age_text, filters.recent_posted_within_days) {
+        return Some(format!(
+            "linkedin_posted_not_less_than_{}d",
+            filters.recent_posted_within_days
+        ));
     }
 
     None
 }
 
-fn is_posted_datetime_stale(datetime_attr: &str, max_age_hours: u64, now: DateTime<Utc>) -> bool {
-    let Some(posted_at) = parse_linkedin_datetime(datetime_attr) else {
-        return false;
+fn is_posted_age_within_limit(posted_age_text: &str, day_limit: u64) -> bool {
+    let text = posted_age_text.trim().to_ascii_lowercase();
+    if text.is_empty() {
+        return true;
+    }
+
+    if day_limit <= 1 {
+        // Exclusive "< 1 day" means keep only hour-level entries.
+        return text.contains("hour");
+    }
+
+    if text.contains("hour") || text.contains("minute") || text.contains("just now") {
+        return true;
+    }
+    if text.contains("today") {
+        return true;
+    }
+    if text.contains("yesterday") {
+        return 1 < day_limit;
+    }
+    let Some(days_old) = extract_relative_days(&text) else {
+        return true;
     };
-    now.signed_duration_since(posted_at) > ChronoDuration::hours(max_age_hours as i64)
+    days_old < day_limit
 }
 
-fn parse_linkedin_datetime(datetime_attr: &str) -> Option<DateTime<Utc>> {
-    let trimmed = datetime_attr.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
+fn extract_relative_days(text: &str) -> Option<u64> {
+    let tokens = text.split_whitespace().collect::<Vec<_>>();
+    for (idx, token) in tokens.iter().enumerate() {
+        let unit = token
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if !unit.starts_with("day") {
+            continue;
+        }
+        if idx == 0 {
+            return None;
+        }
 
-    if let Ok(parsed) = DateTime::parse_from_rfc3339(trimmed) {
-        return Some(parsed.with_timezone(&Utc));
-    }
-
-    for format in [
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-        "%Y-%m-%d %H:%M",
-    ] {
-        if let Ok(parsed) = NaiveDateTime::parse_from_str(trimmed, format) {
-            return Some(Utc.from_utc_datetime(&parsed));
+        let value_raw = tokens[idx - 1]
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if value_raw == "a" || value_raw == "an" {
+            return Some(1);
+        }
+        if let Ok(days) = value_raw.parse::<u64>() {
+            return Some(days);
         }
     }
-
-    if let Ok(parsed) = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d") {
-        let at_midnight = parsed.and_hms_opt(0, 0, 0)?;
-        return Some(Utc.from_utc_datetime(&at_midnight));
-    }
-
     None
 }
 
@@ -1485,62 +1593,115 @@ fn sanitize_error_message(raw: &str) -> String {
 mod tests {
     use super::*;
 
-    fn base_filters() -> crate::config::FiltersConfig {
+    fn filters_with_recent_days(days: u64) -> crate::config::FiltersConfig {
         crate::config::FiltersConfig {
             words_to_avoid_in_title: vec![],
             allowed_title_languages: vec![],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: days,
         }
     }
 
     #[test]
-    fn linkedin_card_with_viewed_footer_is_skipped() {
-        let card = crate::domain::job::SearchCardData {
-            title: "Software Engineer".to_string(),
-            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
-            footer_items: vec!["Viewed".to_string()],
-            posted_datetime: None,
-        };
-        let now = Utc
-            .with_ymd_and_hms(2026, 2, 22, 12, 0, 0)
-            .single()
-            .unwrap();
-
-        let reason = linkedin_search_skip_reason(&base_filters(), &card, now);
-        assert_eq!(reason.as_deref(), Some("linkedin_card_already_viewed"));
-    }
-
-    #[test]
-    fn linkedin_card_older_than_recent_window_is_skipped() {
+    fn linkedin_card_two_days_old_is_skipped_for_two_day_filter_exclusive() {
         let card = crate::domain::job::SearchCardData {
             title: "Software Engineer".to_string(),
             job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
             footer_items: vec![],
-            posted_datetime: Some("2026-02-20".to_string()),
+            posted_age_text: Some("2 days ago".to_string()),
         };
-        let now = Utc
-            .with_ymd_and_hms(2026, 2, 22, 12, 0, 0)
-            .single()
-            .unwrap();
 
-        let reason = linkedin_search_skip_reason(&base_filters(), &card, now);
-        assert_eq!(reason.as_deref(), Some("linkedin_posted_older_than_24h"));
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
+        assert_eq!(reason.as_deref(), Some("linkedin_posted_not_less_than_2d"));
     }
 
     #[test]
-    fn linkedin_card_inside_recent_window_is_not_skipped() {
+    fn linkedin_card_missing_posted_age_is_skipped() {
         let card = crate::domain::job::SearchCardData {
             title: "Software Engineer".to_string(),
             job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
             footer_items: vec![],
-            posted_datetime: Some("2026-02-22".to_string()),
+            posted_age_text: None,
         };
-        let now = Utc
-            .with_ymd_and_hms(2026, 2, 22, 12, 0, 0)
-            .single()
-            .unwrap();
 
-        let reason = linkedin_search_skip_reason(&base_filters(), &card, now);
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
+        assert_eq!(reason.as_deref(), Some("linkedin_posted_age_missing"));
+    }
+
+    #[test]
+    fn linkedin_card_empty_posted_age_is_skipped() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_age_text: Some("   ".to_string()),
+        };
+
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
+        assert_eq!(reason.as_deref(), Some("linkedin_posted_age_missing"));
+    }
+
+    #[test]
+    fn linkedin_card_one_day_old_is_kept_for_two_day_filter() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_age_text: Some("1 day ago".to_string()),
+        };
+
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn linkedin_card_hours_old_is_kept_for_one_day_filter() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_age_text: Some("16 hours ago".to_string()),
+        };
+
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(1), &card);
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn linkedin_card_one_day_old_is_skipped_for_one_day_filter_exclusive() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_age_text: Some("1 day ago".to_string()),
+        };
+
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(1), &card);
+        assert_eq!(reason.as_deref(), Some("linkedin_posted_not_less_than_1d"));
+    }
+
+    #[test]
+    fn linkedin_card_yesterday_is_skipped_for_one_day_filter() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_age_text: Some("Yesterday".to_string()),
+        };
+
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(1), &card);
+        assert_eq!(reason.as_deref(), Some("linkedin_posted_not_less_than_1d"));
+    }
+
+    #[test]
+    fn linkedin_card_yesterday_is_kept_for_two_day_filter() {
+        let card = crate::domain::job::SearchCardData {
+            title: "Software Engineer".to_string(),
+            job_url: "https://www.linkedin.com/jobs/view/123".to_string(),
+            footer_items: vec![],
+            posted_age_text: Some("Yesterday".to_string()),
+        };
+
+        let reason = linkedin_search_skip_reason(&filters_with_recent_days(2), &card);
         assert!(reason.is_none());
     }
 }

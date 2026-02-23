@@ -58,8 +58,8 @@ pub struct FiltersConfig {
     pub words_to_avoid_in_title: Vec<String>,
     #[serde(default)]
     pub allowed_title_languages: Vec<String>,
-    #[serde(default = "default_recent_posted_within_hours")]
-    pub recent_posted_within_hours: u64,
+    #[serde(default = "default_recent_posted_within_days")]
+    pub recent_posted_within_days: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -153,8 +153,8 @@ impl AppConfig {
         if self.retention.days <= 0 {
             bail!("retention.days must be > 0");
         }
-        if self.filters.recent_posted_within_hours == 0 {
-            bail!("filters.recent_posted_within_hours must be > 0");
+        if self.filters.recent_posted_within_days == 0 {
+            bail!("filters.recent_posted_within_days must be > 0");
         }
 
         if self.openai.model.trim().is_empty() {
@@ -248,8 +248,8 @@ const fn default_request_delay_ms() -> u64 {
     1500
 }
 
-const fn default_recent_posted_within_hours() -> u64 {
-    24
+const fn default_recent_posted_within_days() -> u64 {
+    1
 }
 
 fn default_openai_url() -> String {

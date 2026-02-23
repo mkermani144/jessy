@@ -1,6 +1,28 @@
 use crate::config::FiltersConfig;
 use whatlang::detect;
 
+const TITLE_LANGUAGE_RELIABLE_CONFIDENCE_THRESHOLD: f64 = 0.9;
+
+#[derive(Debug, Clone)]
+pub struct TitleLanguageDetection {
+    pub code: String,
+    pub confidence: f64,
+    pub is_reliable: bool,
+}
+
+pub const fn title_language_reliable_confidence_threshold() -> f64 {
+    TITLE_LANGUAGE_RELIABLE_CONFIDENCE_THRESHOLD
+}
+
+pub fn detect_title_language(title: &str) -> Option<TitleLanguageDetection> {
+    let info = detect(title)?;
+    Some(TitleLanguageDetection {
+        code: format!("{:?}", info.lang()).to_ascii_lowercase(),
+        confidence: info.confidence(),
+        is_reliable: info.is_reliable(),
+    })
+}
+
 /// Decision returned by lightweight title pre-filtering.
 #[derive(Debug, Clone)]
 pub struct PreMatchDecision {
@@ -70,24 +92,19 @@ fn language_pre_match(filters: &FiltersConfig, title: &str) -> Option<String> {
         return None;
     }
 
-    let detected = detect_title_language_code(title);
-    if let Some(code) = detected {
+    let detected = detect_title_language(title);
+    if let Some(detection) = detected {
         if !filters
             .allowed_title_languages
             .iter()
-            .any(|allowed| allowed == &code)
+            .any(|allowed| allowed == &detection.code)
         {
-            return Some(format!("title_language_not_allowed:{code}"));
+            return Some(format!("title_language_not_allowed:{}", detection.code));
         }
         return None;
     }
 
     Some("title_language_unknown_not_allowed".to_string())
-}
-
-fn detect_title_language_code(title: &str) -> Option<String> {
-    let info = detect(title)?;
-    Some(format!("{:?}", info.lang()).to_ascii_lowercase())
 }
 
 fn normalize_text(input: &str) -> String {
@@ -222,7 +239,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
             allowed_title_languages: vec![],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let decision = title_pre_match(&filters, "Software Engineer Intern");
@@ -234,7 +251,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             allowed_title_languages: vec![],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let reason = hard_exclusion(
@@ -250,7 +267,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             allowed_title_languages: vec![],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let reason = hard_exclusion(
@@ -266,7 +283,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["intern".to_string()],
             allowed_title_languages: vec![],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let decision = title_pre_match(&filters, "International Sales Manager");
@@ -278,7 +295,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec!["senior engineer".to_string()],
             allowed_title_languages: vec![],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let decision = title_pre_match(&filters, "Lead Senior Engineer Platform");
@@ -290,7 +307,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             allowed_title_languages: vec!["eng".to_string()],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let decision = title_pre_match(
@@ -306,7 +323,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             allowed_title_languages: vec!["eng".to_string()],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let decision = title_pre_match(
@@ -321,7 +338,7 @@ mod tests {
         let filters = FiltersConfig {
             words_to_avoid_in_title: vec![],
             allowed_title_languages: vec!["eng".to_string()],
-            recent_posted_within_hours: 24,
+            recent_posted_within_days: 1,
         };
 
         let decision = title_pre_match(&filters, "//// ???? 12345");

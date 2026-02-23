@@ -78,7 +78,7 @@ pub struct SearchCard {
     #[serde(default)]
     pub footer_items: Vec<String>,
     #[serde(default)]
-    pub posted_datetime: Option<String>,
+    pub posted_age_text: Option<String>,
     pub raw_text: String,
 }
 
@@ -205,15 +205,15 @@ const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
       .map((el) => clean(el.innerText || el.textContent || ''))
       .filter(Boolean)
       .slice(0, 8);
-    const postedNode = node.querySelector('time[datetime]');
-    const postedDatetimeRaw = clean((postedNode && postedNode.getAttribute && postedNode.getAttribute('datetime')) || '');
+    const postedNode = node.querySelector('time');
+    const postedAgeTextRaw = clean((postedNode && (postedNode.innerText || postedNode.textContent)) || '');
 
     return {
       title,
       company_hint: null,
       job_url: jobUrl,
       footer_items: footerItems,
-      posted_datetime: postedDatetimeRaw || null,
+      posted_age_text: postedAgeTextRaw || null,
       raw_text: clean((node.innerText || '').slice(0, 1200)),
     };
   };

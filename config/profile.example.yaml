@@ -13,7 +13,7 @@ crawl:
   request_delay_ms: 1500
 
 filters:
-  recent_posted_within_hours: 24
+  recent_posted_within_days: 1
   # Accepts ISO-639-1/3 aliases (e.g. en/eng).
   allowed_title_languages:
     - en

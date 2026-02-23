@@ -32,7 +32,7 @@ impl SearchPageExtractor for LinkedInAdapter {
                         title: c.title,
                         job_url: c.job_url,
                         footer_items: c.footer_items,
-                        posted_datetime: c.posted_datetime,
+                        posted_age_text: c.posted_age_text,
                     })
                     .collect(),
                 job_links: snapshot.job_links,
