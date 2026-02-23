@@ -723,13 +723,13 @@ async fn scan_search_tab(
             break;
         }
 
-        if let Some(next) = snapshot.next_page_url {
+        if snapshot.next_page_url.is_some() {
             info!(
                 event = "search_page_advance",
                 from_page = idx,
-                to_page = idx + 1
+                to_page = idx + 1,
+                mode = "click_only"
             );
-            session.navigate(&next).await?;
         } else {
             break;
         }

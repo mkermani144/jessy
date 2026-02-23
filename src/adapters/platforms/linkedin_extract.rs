@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tracing::debug;
 use url::Url;
 
 // LinkedIn-owned DOM extraction logic (selectors, scripts, and parsing).
@@ -68,6 +69,12 @@ pub struct SearchPageSnapshot {
     pub job_links: Vec<String>,
     pub next_page_url: Option<String>,
     pub fingerprint_source: String,
+    #[serde(default)]
+    pub materialization_steps: Option<u64>,
+    #[serde(default)]
+    pub materialization_unique_urls: Option<u64>,
+    #[serde(default)]
+    pub materialization_container_kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,7 +115,17 @@ pub async fn extract_search_snapshot(
         .await
         .context("failed extracting search page")?;
 
-    parse_search_snapshot(value)
+    let snapshot = parse_search_snapshot(value)?;
+    debug!(
+        event = "linkedin_search_materialized",
+        steps = snapshot.materialization_steps.unwrap_or(0),
+        unique_urls = snapshot.materialization_unique_urls.unwrap_or(0),
+        container = snapshot
+            .materialization_container_kind
+            .as_deref()
+            .unwrap_or("unknown")
+    );
+    Ok(snapshot)
 }
 
 pub async fn extract_job_detail_snapshot(
@@ -161,14 +178,18 @@ fn guess_company_domain(url: &str) -> Option<String> {
 }
 
 const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
-(() => {
+(async () => {
   const clean = (v) => (v || '').replace(/\s+/g, ' ').trim();
   const CARD_NODE_SELECTORS = __SEARCH_CARD_NODE_SELECTORS__;
   const TITLE_SELECTORS = __SEARCH_TITLE_SELECTORS__;
   const NEXT_PAGE_SELECTORS = __SEARCH_NEXT_PAGE_SELECTORS__;
+  const SCROLL_MAX_STEPS = 60;
+  const SCROLL_DELAY_MS = 250;
+  const SCROLL_STUCK_STEPS = 2;
   const abs = (href) => {
     try { return new URL(href, window.location.href).toString(); } catch (_e) { return null; }
   };
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const titleText = (el) => {
     if (!el) return '';
     const strong = (el.querySelector && el.querySelector('strong')) || null;
@@ -218,50 +239,184 @@ const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
     };
   };
 
-  const cardNodes = [];
-  for (const sel of CARD_NODE_SELECTORS) {
-    cardNodes.push(...document.querySelectorAll(sel));
+  const getCardNodes = () => {
+    const cardNodes = [];
+    for (const sel of CARD_NODE_SELECTORS) {
+      cardNodes.push(...document.querySelectorAll(sel));
+    }
+    return cardNodes;
+  };
+
+  const getNextCandidates = () =>
+    NEXT_PAGE_SELECTORS.flatMap((sel) => [...document.querySelectorAll(sel)]);
+
+  const pickNextControl = () => {
+    const candidates = getNextCandidates();
+    const labeled = candidates.find((el) => {
+      const label = (el.getAttribute && el.getAttribute('aria-label') || '').toLowerCase();
+      return label.includes('next');
+    });
+    if (labeled) return labeled;
+    return candidates.find((el) => (el && el.href) || (el && el.closest && el.closest('a[href]'))) || null;
+  };
+
+  const isElementInSight = (el, container) => {
+    if (!el || !el.getBoundingClientRect) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return false;
+
+    if (!container || container === document.scrollingElement) {
+      return rect.bottom >= 0 && rect.top <= window.innerHeight;
+    }
+
+    if (!container.getBoundingClientRect) return false;
+    const c = container.getBoundingClientRect();
+    const overlapsVertically = rect.bottom >= c.top && rect.top <= c.bottom;
+    const overlapsHorizontally = rect.right >= c.left && rect.left <= c.right;
+    return overlapsVertically && overlapsHorizontally;
+  };
+
+  const isNextControlDisabled = (el) => {
+    if (!el) return true;
+    const ariaDisabled = ((el.getAttribute && el.getAttribute('aria-disabled')) || '').toLowerCase();
+    if (ariaDisabled === 'true') return true;
+    if (el.hasAttribute && el.hasAttribute('disabled')) return true;
+    const className = ((el.className && el.className.toString()) || '').toLowerCase();
+    if (className.includes('disabled')) return true;
+    return false;
+  };
+
+  const isScrollable = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    const overflowY = (style && style.overflowY) || '';
+    const allowsScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+    return allowsScroll && el.scrollHeight > el.clientHeight + 4;
+  };
+
+  const firstCardNode = () => getCardNodes().find(Boolean) || null;
+  const scrollableAncestorOf = (el) => {
+    let cur = el;
+    while (cur && cur.parentElement) {
+      cur = cur.parentElement;
+      if (isScrollable(cur)) return cur;
+    }
+    return null;
+  };
+
+  const resolveScrollContainer = () => {
+    const preferredSelectors = [
+      '.jobs-search-results-list',
+      '.scaffold-layout__list-container',
+      '.scaffold-layout__list',
+    ];
+    for (const sel of preferredSelectors) {
+      const node = document.querySelector(sel);
+      if (node && isScrollable(node)) return { node, kind: sel };
+    }
+
+    const card = firstCardNode();
+    if (card) {
+      const ancestor = scrollableAncestorOf(card);
+      if (ancestor) return { node: ancestor, kind: 'ancestor' };
+    }
+
+    const docScroller = document.scrollingElement;
+    if (docScroller) return { node: docScroller, kind: 'document' };
+    return { node: null, kind: 'none' };
+  };
+
+  const mergeCard = (existing, incoming) => {
+    if (!existing) return incoming;
+    return {
+      title: existing.title || incoming.title,
+      company_hint: existing.company_hint || incoming.company_hint,
+      job_url: existing.job_url || incoming.job_url,
+      footer_items: (existing.footer_items && existing.footer_items.length > 0) ? existing.footer_items : incoming.footer_items,
+      posted_age_text: existing.posted_age_text || incoming.posted_age_text,
+      raw_text: (existing.raw_text && existing.raw_text.length >= incoming.raw_text.length) ? existing.raw_text : incoming.raw_text,
+    };
+  };
+
+  const cardByUrl = new Map();
+  const absorbVisibleCards = () => {
+    for (const node of getCardNodes()) {
+      const c = extractCardFromNode(node);
+      if (!c) continue;
+      cardByUrl.set(c.job_url, mergeCard(cardByUrl.get(c.job_url) || null, c));
+    }
+  };
+
+  const { node: scrollContainer, kind: scrollContainerKind } = resolveScrollContainer();
+  const scrollToTop = async () => {
+    if (!scrollContainer) return;
+    if (scrollContainer === document.scrollingElement) {
+      window.scrollTo(0, 0);
+    } else {
+      scrollContainer.scrollTop = 0;
+    }
+    await sleep(120);
+  };
+  let stepsUsed = 0;
+  let stuckSteps = 0;
+
+  absorbVisibleCards();
+  for (let i = 0; i < SCROLL_MAX_STEPS; i += 1) {
+    absorbVisibleCards();
+    const nextControl = pickNextControl();
+    if (isElementInSight(nextControl, scrollContainer)) {
+      stepsUsed = i;
+      break;
+    }
+
+    if (!scrollContainer) {
+      stepsUsed = i + 1;
+      break;
+    }
+
+    const usesDocumentScroller = scrollContainer === document.scrollingElement;
+    const prevTop = usesDocumentScroller ? window.scrollY : scrollContainer.scrollTop;
+    const delta = usesDocumentScroller
+      ? Math.max(window.innerHeight * 0.8, 300)
+      : Math.max((scrollContainer.clientHeight || 0) * 0.8, 220);
+
+    if (usesDocumentScroller) window.scrollTo(0, prevTop + delta);
+    else scrollContainer.scrollTop = prevTop + delta;
+
+    await sleep(SCROLL_DELAY_MS);
+    absorbVisibleCards();
+
+    const nowTop = usesDocumentScroller ? window.scrollY : scrollContainer.scrollTop;
+    stepsUsed = i + 1;
+    if (Math.abs(nowTop - prevTop) < 1) stuckSteps += 1;
+    else stuckSteps = 0;
+    if (stuckSteps >= SCROLL_STUCK_STEPS) break;
   }
 
-  const cards = [];
-  const seenUrls = new Set();
-  for (const node of cardNodes) {
-    const c = extractCardFromNode(node);
-    if (!c) continue;
-    if (seenUrls.has(c.job_url)) continue;
-    seenUrls.add(c.job_url);
-    cards.push(c);
-  }
+  const cards = [...cardByUrl.values()];
 
-  const nextCandidates = NEXT_PAGE_SELECTORS
-    .flatMap((sel) => [...document.querySelectorAll(sel)]);
-
+  const nextControl = pickNextControl();
   let nextPageUrl = null;
-  for (const el of nextCandidates) {
-    const label = (el.getAttribute && el.getAttribute('aria-label') || '').toLowerCase();
-    if (label.includes('next')) {
-      try {
-        el.click();
-      } catch (_e) {}
-      break;
-    }
-  }
-
-  for (const el of nextCandidates) {
-    if (el && el.href) {
-      nextPageUrl = abs(el.href || '');
-      break;
-    }
-    if (el && el.closest) {
-      const parentA = el.closest('a[href]');
+  const hasNext = !!nextControl && !isNextControlDisabled(nextControl);
+  if (hasNext && nextControl) {
+    if (nextControl.href) {
+      nextPageUrl = abs(nextControl.href || '');
+    } else if (nextControl.closest) {
+      const parentA = nextControl.closest('a[href]');
       if (parentA && parentA.href) {
         nextPageUrl = abs(parentA.href);
-        break;
       }
     }
+
+    await scrollToTop();
+    try {
+      nextControl.click();
+    } catch (_e) {}
+    await sleep(SCROLL_DELAY_MS);
+    await scrollToTop();
   }
 
-  if (!nextPageUrl) {
+  if (hasNext && !nextPageUrl) {
     try {
       const u = new URL(window.location.href);
       const isLinkedinJobs = /linkedin\.com$/i.test(u.hostname) && u.pathname.includes('/jobs/search');
@@ -284,6 +439,9 @@ const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
     job_links: links,
     next_page_url: nextPageUrl,
     fingerprint_source: source,
+    materialization_steps: stepsUsed,
+    materialization_unique_urls: cardByUrl.size,
+    materialization_container_kind: scrollContainerKind,
   };
 })();
 "#;
