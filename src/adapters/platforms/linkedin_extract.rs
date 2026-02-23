@@ -348,15 +348,6 @@ const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
   };
 
   const { node: scrollContainer, kind: scrollContainerKind } = resolveScrollContainer();
-  const scrollToTop = async () => {
-    if (!scrollContainer) return;
-    if (scrollContainer === document.scrollingElement) {
-      window.scrollTo(0, 0);
-    } else {
-      scrollContainer.scrollTop = 0;
-    }
-    await sleep(120);
-  };
   let stepsUsed = 0;
   let stuckSteps = 0;
 
@@ -407,13 +398,6 @@ const SEARCH_EXTRACTION_SCRIPT_TEMPLATE: &str = r#"
         nextPageUrl = abs(parentA.href);
       }
     }
-
-    await scrollToTop();
-    try {
-      nextControl.click();
-    } catch (_e) {}
-    await sleep(SCROLL_DELAY_MS);
-    await scrollToTop();
   }
 
   if (hasNext && !nextPageUrl) {

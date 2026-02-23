@@ -59,6 +59,34 @@ const SELECTOR_RETRY_DELAY_MS: u64 = 2200;
 const DEFAULT_SEED_WORKERS: usize = 4;
 const PAGE_READY_MAX_WAIT_MS: u64 = 5000;
 const PAGE_READY_POLL_MS: u64 = 250;
+const SEARCH_NEXT_CLICK_SCRIPT: &str = r#"
+(() => {
+  const lower = (v) => ((v || '').toString()).trim().toLowerCase();
+  const selectors = [
+    '.jobs-search-pagination__button',
+    'button[aria-label]',
+    'a[aria-label]',
+    'button[rel="next"]',
+    'a[rel="next"]',
+  ];
+  const nodes = selectors.flatMap((sel) => [...document.querySelectorAll(sel)]);
+  const byLabel = nodes.find((el) => lower(el.getAttribute && el.getAttribute('aria-label')).includes('next'));
+  const byText = nodes.find((el) => {
+    const txt = lower(el.innerText || el.textContent);
+    return txt === 'next' || txt.startsWith('next ');
+  });
+  const target = byLabel || byText || null;
+  if (!target) return false;
+
+  const ariaDisabled = lower(target.getAttribute && target.getAttribute('aria-disabled'));
+  if (ariaDisabled === 'true') return false;
+  if (target.hasAttribute && target.hasAttribute('disabled')) return false;
+  if (lower(target.className).includes('disabled')) return false;
+
+  try { target.scrollIntoView({ block: 'center' }); } catch (_e) {}
+  try { target.click(); return true; } catch (_e) { return false; }
+})()
+"#;
 
 #[derive(Debug, Clone)]
 struct JobSeed {
@@ -777,21 +805,22 @@ async fn scan_search_tab(
             break;
         }
 
-        if snapshot.next_page_url.is_some() {
-            info!(
-                event = "search_page_advance",
-                from_page = idx,
-                to_page = idx + 1,
-                mode = "click_only"
-            );
-        } else {
+        let Some(next_page_url) = snapshot.next_page_url.as_deref() else {
             info!(
                 event = "terminate_tab",
                 page_index = idx,
                 reason = "no_next_page"
             );
             break;
-        }
+        };
+
+        let mode = advance_search_page(session, next_page_url).await?;
+        info!(
+            event = "search_page_advance",
+            from_page = idx,
+            to_page = idx + 1,
+            mode
+        );
     }
 
     Ok(seeds)
@@ -1628,6 +1657,34 @@ async fn wait_for_page_ready(session: &mut dyn BrowserSession, max_wait_ms: u64)
         tokio::time::sleep(Duration::from_millis(PAGE_READY_POLL_MS)).await;
         elapsed += PAGE_READY_POLL_MS;
     }
+}
+
+async fn advance_search_page(
+    session: &mut dyn BrowserSession,
+    next_page_url: &str,
+) -> Result<&'static str> {
+    let clicked = match session.evaluate(SEARCH_NEXT_CLICK_SCRIPT).await {
+        Ok(v) => v.as_bool().unwrap_or(false),
+        Err(err) => {
+            debug!(
+                event = "search_page_advance_click_eval_failed",
+                error = %sanitize_error_message(&err.to_string())
+            );
+            false
+        }
+    };
+
+    if clicked {
+        wait_for_page_ready(session, PAGE_READY_MAX_WAIT_MS).await;
+        return Ok("click_then_wait");
+    }
+
+    session
+        .navigate(next_page_url)
+        .await
+        .context("failed navigating to next search page")?;
+    wait_for_page_ready(session, PAGE_READY_MAX_WAIT_MS).await;
+    Ok("navigate_then_wait")
 }
 
 fn sanitize_error_message(raw: &str) -> String {
