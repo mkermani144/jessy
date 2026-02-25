@@ -204,7 +204,7 @@ const fn default_true() -> bool {
 }
 
 fn default_chrome_binary() -> String {
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".to_string()
+    "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta".to_string()
 }
 
 fn default_startup_urls() -> Vec<String> {

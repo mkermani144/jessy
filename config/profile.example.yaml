@@ -2,7 +2,7 @@ chrome:
   debug_port: 9222
   profile_dir: /tmp/jessy-chrome-profile
   auto_launch: true
-  binary_path: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+  binary_path: /Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta
   startup_urls:
     - https://www.linkedin.com/jobs/search/
     - https://web.telegram.org/

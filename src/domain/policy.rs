@@ -246,5 +246,4 @@ mod tests {
         let decision = title_pre_match(&filters, "Lead Senior Engineer Platform");
         assert!(!decision.should_open_detail);
     }
-
 }
