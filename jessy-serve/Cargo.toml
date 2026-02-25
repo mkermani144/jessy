@@ -1,0 +1,9 @@
+[package]
+name = "jessy-serve"
+version = "0.1.0"
+edition = "2021"
+description = "Jessy pipeline serve step"
+license = "MIT"
+
+[dependencies]
+jessy-core = { path = "../jessy-core" }

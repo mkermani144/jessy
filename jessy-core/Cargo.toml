@@ -1,0 +1,9 @@
+[package]
+name = "jessy-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared core types and ports for Jessy pipeline"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }

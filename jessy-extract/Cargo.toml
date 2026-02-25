@@ -1,0 +1,9 @@
+[package]
+name = "jessy-extract"
+version = "0.1.0"
+edition = "2021"
+description = "Jessy pipeline extract step"
+license = "MIT"
+
+[dependencies]
+jessy-core = { path = "../jessy-core" }

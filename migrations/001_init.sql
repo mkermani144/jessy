@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     source_page_index INTEGER NOT NULL,
     status TEXT NOT NULL,
     status_reason TEXT NOT NULL,
+    current_stage TEXT,
+    status_meta TEXT,
     requirements_summary TEXT NOT NULL,
     company_summary TEXT NOT NULL,
     company_size TEXT

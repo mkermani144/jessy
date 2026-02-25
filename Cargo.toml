@@ -1,3 +1,15 @@
+[workspace]
+members = [
+    ".",
+    "jessy-core",
+    "jessy-extract",
+    "jessy-load",
+    "jessy-prefilter",
+    "jessy-enrich",
+    "jessy-serve",
+]
+resolver = "2"
+
 [package]
 name = "jessy"
 version = "0.1.0"
