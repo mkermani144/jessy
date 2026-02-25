@@ -6,38 +6,41 @@ const PRIMARY: &str = "\x1b[38;5;39m";
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 
-pub fn print_report(rows: &[ReportRow], show_not_opportunities: bool) {
+pub fn print_report(rows: &[ReportRow], show_not_opportunities: bool, table_only: bool) {
     if rows.is_empty() {
         println!("No jobs found in this run.");
         return;
     }
 
     let width = card_width();
-    let visible_rows = rows
+    let card_rows = rows
         .iter()
-        .filter(|r| show_not_opportunities || r.status == "opportunity")
+        .filter(|r| show_not_opportunities || is_accepted_status(&r.status))
         .collect::<Vec<_>>();
-
-    if visible_rows.is_empty() {
-        println!("No rows to display with current filters.");
-        return;
-    }
 
     println!();
     print_banner(width);
-    for row in visible_rows {
+    print_summary_table(&rows.iter().collect::<Vec<_>>(), width);
+    if table_only {
+        return;
+    }
+    if card_rows.is_empty() {
+        println!("No rows to display with current card filters.");
+        return;
+    }
+    for row in card_rows {
         print_card(row, width);
     }
 }
 
 fn card_width() -> usize {
-    let default = 108usize;
+    let default = 140usize;
     let columns = env::var("COLUMNS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(default);
 
-    columns.clamp(92, 124)
+    columns.clamp(110, 180)
 }
 
 fn print_banner(width: usize) {
@@ -53,12 +56,148 @@ fn print_banner(width: usize) {
     println!("{}{}╚{}╝{}", PRIMARY, BOLD, "═".repeat(width - 2), RESET);
 }
 
+fn print_summary_table(rows: &[&ReportRow], width: usize) {
+    let page_width = "page".len().max(4);
+    let status_width = "accepted".len();
+    let reason_width = usize::min(42, usize::max(24, width / 4));
+    let total_width = width.saturating_sub(2);
+    let available = total_width.saturating_sub(page_width + status_width + reason_width + 12);
+    let title_width = available / 3;
+    let url_width = available.saturating_sub(title_width);
+
+    println!();
+    println!(
+        "{}{}{:title_w$} | {:url_w$} | {:page_w$} | {:status_w$} | {:reason_w$}{}",
+        PRIMARY,
+        BOLD,
+        "title",
+        "url",
+        "page",
+        "status",
+        "reason",
+        RESET,
+        title_w = title_width,
+        url_w = url_width,
+        page_w = page_width,
+        status_w = status_width,
+        reason_w = reason_width
+    );
+    println!("{}{}{}", PRIMARY, "-".repeat(total_width), RESET);
+
+    for row in rows {
+        println!(
+            "{:title_w$} | {:url_w$} | {:page_w$} | {:status_w$} | {:reason_w$}",
+            truncate_cell(&row.title, title_width),
+            truncate_cell(&row.canonical_url, url_width),
+            truncate_cell(&row.source_page_index.to_string(), page_width),
+            report_status(row),
+            truncate_cell(&report_reason(row), reason_width),
+            title_w = title_width,
+            url_w = url_width,
+            page_w = page_width,
+            status_w = status_width,
+            reason_w = reason_width
+        );
+    }
+}
+
+fn report_status(row: &ReportRow) -> &'static str {
+    if is_accepted_status(&row.status) {
+        return "accepted";
+    }
+    if row.status == "failed" || is_failed_row(row) {
+        return "failed";
+    }
+    "rejected"
+}
+
+fn report_reason(row: &ReportRow) -> String {
+    match report_status(row) {
+        "accepted" => String::new(),
+        _ => compact_reason(&row.summary),
+    }
+}
+
+fn compact_reason(summary: &str) -> String {
+    let trimmed = summary.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some(reason) = trimmed.strip_prefix("Rejected at prefilter: ") {
+        return format!("prefilter:{}", normalize_reason_key(reason));
+    }
+    if trimmed.eq_ignore_ascii_case("Rejected: already seen in history") {
+        return "seen_history".to_string();
+    }
+    if trimmed.eq_ignore_ascii_case("Rejected: duplicate in current scan") {
+        return "duplicate_scan".to_string();
+    }
+    if let Some(reason) = trimmed.strip_prefix("Rejected: hard exclusion (") {
+        let key = reason.trim_end_matches(')').trim();
+        return format!("hard_exclusion:{}", normalize_reason_key(key));
+    }
+    if let Some(reason) = trimmed.strip_prefix("Hard exclusion: ") {
+        return format!("hard_exclusion:{}", normalize_reason_key(reason));
+    }
+    if trimmed
+        .to_ascii_lowercase()
+        .starts_with("failed extraction/classification:")
+    {
+        return "extract_failed".to_string();
+    }
+
+    normalize_reason_key(trimmed)
+}
+
+fn normalize_reason_key(input: &str) -> String {
+    let mut out = String::new();
+    let mut prev_underscore = false;
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_underscore = false;
+            continue;
+        }
+        if !prev_underscore {
+            out.push('_');
+            prev_underscore = true;
+        }
+    }
+    out.trim_matches('_').to_string()
+}
+
+fn is_accepted_status(status: &str) -> bool {
+    status == "opportunity" || status == "accepted"
+}
+
+fn is_failed_row(row: &ReportRow) -> bool {
+    row.summary
+        .to_ascii_lowercase()
+        .contains("failed extraction/classification")
+}
+
+fn truncate_cell(value: &str, max_chars: usize) -> String {
+    let clean = value.replace('\n', " ");
+    let len = clean.chars().count();
+    if len <= max_chars {
+        return clean;
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+
+    let mut out = clean.chars().take(max_chars - 3).collect::<String>();
+    out.push_str("...");
+    out
+}
+
 fn print_card(row: &ReportRow, width: usize) {
     let inner = width - 4;
-    let badge = if row.status == "opportunity" {
-        "[OPPORTUNITY]"
-    } else {
-        "[NOT OPPORTUNITY]"
+    let badge = match report_status(row) {
+        "accepted" => "[ACCEPTED]",
+        "failed" => "[FAILED]",
+        _ => "[REJECTED]",
     };
     let requirement_keywords = extract_requirement_keywords(&row.requirements);
     let requirements_text = if requirement_keywords.is_empty() {

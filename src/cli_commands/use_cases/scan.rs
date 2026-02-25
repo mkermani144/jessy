@@ -90,12 +90,36 @@ const SEARCH_NEXT_CLICK_SCRIPT: &str = r#"
 
 #[derive(Debug, Clone)]
 struct JobSeed {
+    order_index: usize,
     platform: PlatformKind,
     source_tab_url: String,
     page_index: i64,
     url: String,
     pre_title: Option<String>,
     pre_match_reason: String,
+}
+
+#[derive(Debug, Clone)]
+struct FailedSeedLog {
+    source_tab_url: String,
+    source_page_index: i64,
+    canonical_url: String,
+    title: String,
+    pre_match_reason: String,
+    error: String,
+}
+
+#[derive(Debug, Default)]
+struct SearchTabScanResult {
+    seeds: Vec<JobSeed>,
+    report_rows: Vec<(usize, ReportRow)>,
+}
+
+#[derive(Debug, Clone)]
+struct SeedProcessResult {
+    is_new: bool,
+    status: String,
+    report_row: ReportRow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,7 +138,7 @@ enum SearchCardPrefilterAction {
 /// 2) extract jobs (search/detail)
 /// 3) AI extraction + policy checks
 /// 4) persist and render report
-pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>) -> Result<()> {
+pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>, dry_run: bool) -> Result<()> {
     deps.browser.ensure_ready().await?;
 
     let version = deps.browser.version().await?;
@@ -123,6 +147,9 @@ pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>) -> Result<()> {
         browser = %version.browser,
         protocol = %version.protocol_version
     );
+    if dry_run {
+        info!(event = "dry_run_enabled", mode = "scan");
+    }
 
     deps.storage.cleanup_old_records(cfg.retention.days).await?;
 
@@ -139,6 +166,7 @@ pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>) -> Result<()> {
     let outcome = run_scan(
         cfg,
         deps,
+        dry_run,
         run_id,
         &mut total_scanned,
         &mut new_jobs,
@@ -151,7 +179,7 @@ pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>) -> Result<()> {
     let finished_at = Utc::now();
 
     match outcome {
-        Ok(()) => {
+        Ok(rows) => {
             deps.storage
                 .finish_run(&RunCompletion {
                     run_id,
@@ -164,8 +192,7 @@ pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>) -> Result<()> {
                 })
                 .await?;
 
-            let rows = deps.storage.load_report_rows(run_id).await?;
-            deps.reporter.print_report(&rows, false);
+            deps.reporter.print_report(&rows, false, dry_run);
 
             println!();
             println!("Run {} completed", run_id);
@@ -227,7 +254,7 @@ pub async fn scan(cfg: &AppConfig, deps: &ScanDeps<'_>) -> Result<()> {
 /// - ignores database completely,
 /// - scans jobs from the current search page,
 /// - includes rejection reasons in output.
-pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
+pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>, dry_run: bool) -> Result<()> {
     deps.browser.ensure_ready().await?;
     let version = deps.browser.version().await?;
     info!(
@@ -235,6 +262,9 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
         browser = %version.browser,
         protocol = %version.protocol_version
     );
+    if dry_run {
+        info!(event = "dry_run_enabled", mode = "scan_dev");
+    }
 
     let candidates = deps.browser.list_candidate_tabs().await?;
     info!(
@@ -297,6 +327,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                             idx,
                             ReportRow {
                                 title,
+                                source_page_index: 1,
                                 company: None,
                                 canonical_url: job_page::canonicalize_url(&card.job_url),
                                 status: "not_opportunity".to_string(),
@@ -346,6 +377,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                 idx,
                 ReportRow {
                     title,
+                    source_page_index: 1,
                     company: None,
                     canonical_url: job_page::canonicalize_url(&card.job_url),
                     status: "not_opportunity".to_string(),
@@ -369,6 +401,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
         seeds.push((
             idx,
             JobSeed {
+                order_index: idx,
                 platform,
                 source_tab_url: tab.url.clone(),
                 page_index: 1,
@@ -398,14 +431,16 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
             .clone()
             .unwrap_or_else(|| "Unknown title".to_string());
         let fallback_url = job_page::canonicalize_url(&seed.url);
+        let fallback_page = seed.page_index;
         async move {
-            let result = process_seed_dev(cfg, deps, seed).await;
-            (idx, fallback_title, fallback_url, result)
+            let result = process_seed_dev(cfg, deps, seed, dry_run).await;
+            (idx, fallback_title, fallback_url, fallback_page, result)
         }
     }))
     .buffer_unordered(worker_count);
 
-    while let Some((idx, fallback_title, fallback_url, result)) = stream.next().await {
+    while let Some((idx, fallback_title, fallback_url, fallback_page, result)) = stream.next().await
+    {
         match result {
             Ok(row) => rows.push((idx, row)),
             Err(err) => {
@@ -413,11 +448,12 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
                     idx,
                     ReportRow {
                         title: fallback_title,
+                        source_page_index: fallback_page,
                         company: None,
                         canonical_url: fallback_url,
-                        status: "not_opportunity".to_string(),
+                        status: "failed".to_string(),
                         summary: format!(
-                            "Rejected due to extraction/classification error: {}",
+                            "Failed extraction/classification: {}",
                             sanitize_error_message(&err.to_string())
                         ),
                         location: None,
@@ -440,7 +476,7 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
     rows.sort_by_key(|(idx, _)| *idx);
     let rows = rows.into_iter().map(|(_, row)| row).collect::<Vec<_>>();
 
-    deps.reporter.print_report(&rows, true);
+    deps.reporter.print_report(&rows, true, dry_run);
 
     let opportunities = rows.iter().filter(|r| r.status == "opportunity").count();
     let rejected = rows.len().saturating_sub(opportunities);
@@ -464,12 +500,13 @@ pub async fn scan_dev(cfg: &AppConfig, deps: &DevScanDeps<'_>) -> Result<()> {
 async fn run_scan(
     cfg: &AppConfig,
     deps: &ScanDeps<'_>,
+    dry_run: bool,
     run_id: i64,
     total_scanned: &mut usize,
     new_jobs: &mut usize,
     opportunities: &mut usize,
     not_opportunities: &mut usize,
-) -> Result<()> {
+) -> Result<Vec<ReportRow>> {
     let all_tabs = deps.browser.list_tabs().await?;
     let candidates = deps.browser.list_candidate_tabs().await?;
     info!(
@@ -480,10 +517,12 @@ async fn run_scan(
 
     if candidates.is_empty() {
         info!(event = "no_matching_tabs");
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let mut seeds = Vec::new();
+    let mut ordered_rows: Vec<(usize, ReportRow)> = Vec::new();
+    let mut next_order_index = 0usize;
     for tab in candidates {
         let Some(adapter) = deps.platform_registry.resolve_by_url(&tab.url) else {
             info!(event = "tab_unsupported_platform");
@@ -498,15 +537,29 @@ async fn run_scan(
             .context("failed opening browser session for candidate tab")?;
 
         if is_search {
-            match scan_search_tab(cfg, deps, session.as_mut(), &tab, adapter.as_ref()).await {
-                Ok(mut tab_seeds) => {
+            match scan_search_tab(
+                cfg,
+                deps,
+                session.as_mut(),
+                &tab,
+                adapter.as_ref(),
+                &mut next_order_index,
+            )
+            .await
+            {
+                Ok(mut tab_result) => {
+                    let rejected = tab_result.report_rows.len();
+                    *total_scanned += rejected;
+                    *not_opportunities += rejected;
                     info!(
                         event = "tab_done",
                         tab_kind = "search",
                         platform = platform.as_str(),
-                        seeds_added = tab_seeds.len()
+                        seeds_added = tab_result.seeds.len(),
+                        rejected_prefiltered = rejected
                     );
-                    seeds.append(&mut tab_seeds);
+                    seeds.append(&mut tab_result.seeds);
+                    ordered_rows.append(&mut tab_result.report_rows);
                 }
                 Err(err) => {
                     warn!(
@@ -519,6 +572,7 @@ async fn run_scan(
             }
         } else {
             seeds.push(JobSeed {
+                order_index: next_scan_order(&mut next_order_index),
                 platform,
                 source_tab_url: tab.url.clone(),
                 page_index: 1,
@@ -537,7 +591,8 @@ async fn run_scan(
 
     if seeds.is_empty() {
         info!(event = "no_candidate_jobs_after_prefilter");
-        return Ok(());
+        ordered_rows.sort_by_key(|(order, _)| *order);
+        return Ok(ordered_rows.into_iter().map(|(_, row)| row).collect());
     }
 
     let total_seeds = seeds.len();
@@ -546,42 +601,132 @@ async fn run_scan(
     let worker_count = usize::min(DEFAULT_SEED_WORKERS, usize::max(1, total_seeds));
     info!(event = "seed_workers", workers = worker_count);
 
-    let mut stream = stream::iter(seeds.into_iter().enumerate().map(|(idx, seed)| async move {
-        debug!(
-            event = "seed_start",
-            queue_index = idx + 1,
-            queue_total = total_seeds,
-            pre_match = %seed.pre_match_reason
-        );
-        let result = process_seed(cfg, deps, run_id, seed).await;
-        (idx, result)
+    let mut stream = stream::iter(seeds.into_iter().enumerate().map(|(idx, seed)| {
+        let fallback_title = seed
+            .pre_title
+            .clone()
+            .unwrap_or_else(|| infer_title_from_url(&seed.url));
+        let canonical_url = job_page::canonicalize_url(&seed.url);
+        let source_tab_url = seed.source_tab_url.clone();
+        let source_page_index = seed.page_index;
+        let pre_match_reason = seed.pre_match_reason.clone();
+        let order_index = seed.order_index;
+        async move {
+            debug!(
+                event = "seed_start",
+                queue_index = order_index + 1,
+                queue_total = total_seeds,
+                pre_match = %seed.pre_match_reason
+            );
+            let result = process_seed(cfg, deps, run_id, seed, dry_run).await;
+            (
+                idx,
+                order_index,
+                fallback_title,
+                canonical_url,
+                source_tab_url,
+                source_page_index,
+                pre_match_reason,
+                result,
+            )
+        }
     }))
     .buffer_unordered(worker_count);
 
-    while let Some((_idx, result)) = stream.next().await {
+    let mut failed_jobs = Vec::new();
+
+    while let Some((
+        _idx,
+        order_index,
+        fallback_title,
+        canonical_url,
+        source_tab_url,
+        source_page_index,
+        pre_match_reason,
+        result,
+    )) = stream.next().await
+    {
         *total_scanned += 1;
         match result {
-            Ok((is_new, status)) => {
-                if is_new {
+            Ok(outcome) => {
+                if outcome.is_new {
                     *new_jobs += 1;
                 }
-                if status == "opportunity" {
+                if outcome.status == "opportunity" {
                     *opportunities += 1;
                 } else {
                     *not_opportunities += 1;
                 }
-                info!(event = "seed_done", status = %status, is_new);
+                info!(
+                    event = "seed_done",
+                    status = %outcome.status,
+                    is_new = outcome.is_new
+                );
+                ordered_rows.push((order_index, outcome.report_row));
             }
             Err(err) => {
+                let error = sanitize_error_message(&err.to_string());
                 warn!(
                     event = "seed_failed",
-                    error = %sanitize_error_message(&err.to_string())
+                    source_page = source_page_index,
+                    canonical_url = %canonical_url,
+                    pre_match = %pre_match_reason,
+                    error = %error
                 );
+                failed_jobs.push(FailedSeedLog {
+                    source_tab_url,
+                    source_page_index,
+                    canonical_url: canonical_url.clone(),
+                    title: fallback_title.clone(),
+                    pre_match_reason,
+                    error: error.clone(),
+                });
+                ordered_rows.push((
+                    order_index,
+                    ReportRow {
+                        title: fallback_title,
+                        source_page_index,
+                        company: None,
+                        canonical_url,
+                        status: "failed".to_string(),
+                        summary: format!("Failed extraction/classification: {error}"),
+                        location: None,
+                        language: None,
+                        work_mode: None,
+                        employment_type: None,
+                        posted_text: None,
+                        compensation_text: None,
+                        visa_policy_text: None,
+                        description: None,
+                        company_summary: None,
+                        company_size: None,
+                        requirements: vec![],
+                    },
+                ));
             }
         }
     }
 
-    Ok(())
+    if !failed_jobs.is_empty() {
+        warn!(
+            event = "failed_jobs_after_extraction",
+            count = failed_jobs.len()
+        );
+        for failed in &failed_jobs {
+            warn!(
+                event = "failed_job_after_extraction",
+                source_tab_url = %failed.source_tab_url,
+                source_page = failed.source_page_index,
+                canonical_url = %failed.canonical_url,
+                title = %failed.title,
+                pre_match = %failed.pre_match_reason,
+                error = %failed.error
+            );
+        }
+    }
+
+    ordered_rows.sort_by_key(|(order, _)| *order);
+    Ok(ordered_rows.into_iter().map(|(_, row)| row).collect())
 }
 
 #[tracing::instrument(name = "scan_search_tab", skip_all)]
@@ -591,10 +736,11 @@ async fn scan_search_tab(
     session: &mut dyn BrowserSession,
     tab: &CandidateTab,
     adapter: &dyn PlatformAdapter,
-) -> Result<Vec<JobSeed>> {
+    next_order_index: &mut usize,
+) -> Result<SearchTabScanResult> {
     let mut seen_links = std::collections::HashSet::new();
     let mut seen_fingerprints_in_run = std::collections::HashSet::new();
-    let mut seeds = Vec::new();
+    let mut out = SearchTabScanResult::default();
     let tab_key = make_tab_key(&tab.url);
     let platform = adapter.kind();
     let is_linkedin = platform == PlatformKind::LinkedIn;
@@ -665,6 +811,15 @@ async fn scan_search_tab(
                                 reason = %reason,
                                 title = %title
                             );
+                            out.report_rows.push((
+                                next_scan_order(next_order_index),
+                                build_rejected_report_row(
+                                    title,
+                                    job_page::canonicalize_url(&card.job_url),
+                                    page_index,
+                                    format!("Rejected at prefilter: {reason}"),
+                                ),
+                            ));
                             continue;
                         }
                         SearchCardPrefilterAction::TerminateTab { reason } => {
@@ -674,6 +829,15 @@ async fn scan_search_tab(
                                 reason = %reason,
                                 title = %title
                             );
+                            out.report_rows.push((
+                                next_scan_order(next_order_index),
+                                build_rejected_report_row(
+                                    title,
+                                    job_page::canonicalize_url(&card.job_url),
+                                    page_index,
+                                    format!("Rejected at prefilter: {reason}"),
+                                ),
+                            ));
                             terminate_tab_reason = Some(reason);
                             break;
                         }
@@ -686,10 +850,38 @@ async fn scan_search_tab(
                 skipped_seen += 1;
                 stop_on_seen_job = true;
                 info!(event = "stop_on_seen_job", page_index = idx);
+                let title = if card.title.trim().is_empty() {
+                    infer_title_from_url(&canonical)
+                } else {
+                    card.title.clone()
+                };
+                out.report_rows.push((
+                    next_scan_order(next_order_index),
+                    build_rejected_report_row(
+                        title,
+                        canonical,
+                        page_index,
+                        "Rejected: already seen in history".to_string(),
+                    ),
+                ));
                 break;
             }
             if !seen_links.insert(canonical.clone()) {
                 skipped_seen += 1;
+                let title = if card.title.trim().is_empty() {
+                    infer_title_from_url(&canonical)
+                } else {
+                    card.title.clone()
+                };
+                out.report_rows.push((
+                    next_scan_order(next_order_index),
+                    build_rejected_report_row(
+                        title,
+                        canonical,
+                        page_index,
+                        "Rejected: duplicate in current scan".to_string(),
+                    ),
+                ));
                 continue;
             }
 
@@ -707,13 +899,23 @@ async fn scan_search_tab(
                     reason = %decision.reason,
                     title = %title
                 );
+                out.report_rows.push((
+                    next_scan_order(next_order_index),
+                    build_rejected_report_row(
+                        title,
+                        canonical,
+                        page_index,
+                        format!("Rejected at prefilter: {}", decision.reason),
+                    ),
+                ));
                 continue;
             }
             if card.title.trim().is_empty() {
                 forced_open_no_title += 1;
             }
 
-            seeds.push(JobSeed {
+            out.seeds.push(JobSeed {
+                order_index: next_scan_order(next_order_index),
                 platform,
                 source_tab_url: tab.url.clone(),
                 page_index,
@@ -782,7 +984,7 @@ async fn scan_search_tab(
         );
     }
 
-    Ok(seeds)
+    Ok(out)
 }
 
 #[tracing::instrument(
@@ -795,7 +997,8 @@ async fn process_seed(
     deps: &ScanDeps<'_>,
     run_id: i64,
     seed: JobSeed,
-) -> Result<(bool, String)> {
+    dry_run: bool,
+) -> Result<SeedProcessResult> {
     debug!(event = "open_detail_tab");
 
     let tab = deps
@@ -804,7 +1007,7 @@ async fn process_seed(
         .await
         .context("failed opening detail tab")?;
 
-    let result = process_opened_tab(cfg, deps, run_id, &seed, &tab).await;
+    let result = process_opened_tab(cfg, deps, run_id, &seed, &tab, dry_run).await;
 
     if let Err(err) = deps.browser.close_tab(&tab.id).await {
         warn!(
@@ -841,6 +1044,7 @@ async fn process_seed_dev(
     cfg: &AppConfig,
     deps: &DevScanDeps<'_>,
     seed: JobSeed,
+    dry_run: bool,
 ) -> Result<ReportRow> {
     let tab = deps
         .browser
@@ -848,7 +1052,7 @@ async fn process_seed_dev(
         .await
         .context("failed opening detail tab")?;
 
-    let result = process_opened_tab_dev(cfg, deps, &seed, &tab).await;
+    let result = process_opened_tab_dev(cfg, deps, &seed, &tab, dry_run).await;
 
     if let Err(err) = deps.browser.close_tab(&tab.id).await {
         warn!(
@@ -872,7 +1076,8 @@ async fn process_opened_tab(
     run_id: i64,
     seed: &JobSeed,
     tab: &BrowserPageTab,
-) -> Result<(bool, String)> {
+    dry_run: bool,
+) -> Result<SeedProcessResult> {
     let ws = tab
         .websocket_debugger_url
         .as_deref()
@@ -895,52 +1100,73 @@ async fn process_opened_tab(
         .await?
     {
         debug!(event = "skip_already_seen");
-        return Ok((false, "not_opportunity".to_string()));
+        return Ok(SeedProcessResult {
+            is_new: false,
+            status: "not_opportunity".to_string(),
+            report_row: build_rejected_report_row(
+                extraction.title,
+                extraction.canonical_url,
+                seed.page_index,
+                "Rejected: already seen in history".to_string(),
+            ),
+        });
     }
 
     if dom_element.trim().is_empty() {
         bail!("detail extraction missing aboutTheJob DOM element");
     }
 
-    let ai_input = AiInput { dom_element };
-    let ai_decision = deps
-        .ai
-        .classify(&ai_input)
-        .await
-        .context("ai extraction failed")?
-        .sanitized();
-    let language_text = ai_decision.language.clone();
-    let work_mode_text = ai_decision.work_mode.as_ref().map(work_mode_to_string);
-    let compensation_text = ai_decision.compensation_text.clone();
-    let visa_policy_text = ai_decision
-        .visa_policy_text
-        .as_ref()
-        .map(visa_policy_to_string);
+    let mut language_text: Option<String> = None;
+    let mut work_mode_text: Option<String> = None;
+    let mut compensation_text: Option<String> = None;
+    let mut visa_policy_text: Option<String> = None;
+    let mut ai_visa_not_sponsored = false;
 
-    if let Some(title) = ai_decision.title.clone() {
-        extraction.title = title;
-    }
-    if let Some(company_name) = ai_decision.company_name.clone() {
-        extraction.company = company_name;
-    }
-    if let Some(location_text) = ai_decision.location_text.clone() {
-        extraction.location = Some(location_text);
-    }
-    if let Some(employment_type) = ai_decision.employment_type.clone() {
-        extraction.employment_type = Some(employment_type_to_string(&employment_type));
-    }
-    if let Some(description) = ai_decision.description.clone() {
-        extraction.description = description;
-    }
-    let ai_requirements = flatten_requirements(&ai_decision.requirements);
-    if !ai_requirements.is_empty() {
-        extraction.requirements = ai_requirements;
-    }
-    if let Some(company_summary) = ai_decision.company_summary.clone() {
-        extraction.company_summary = Some(company_summary);
-    }
-    if let Some(company_size_text) = ai_decision.company_size_text.clone() {
-        extraction.company_size = Some(company_size_to_string(&company_size_text));
+    if !dry_run {
+        let ai_input = AiInput { dom_element };
+        let ai_decision = deps
+            .ai
+            .classify(&ai_input)
+            .await
+            .context("ai extraction failed")?
+            .sanitized();
+        language_text = ai_decision.language.clone();
+        work_mode_text = ai_decision.work_mode.as_ref().map(work_mode_to_string);
+        compensation_text = ai_decision.compensation_text.clone();
+        visa_policy_text = ai_decision
+            .visa_policy_text
+            .as_ref()
+            .map(visa_policy_to_string);
+        ai_visa_not_sponsored = matches!(
+            ai_decision.visa_policy_text,
+            Some(VisaPolicy::VisaNotSponsored)
+        );
+
+        if let Some(title) = ai_decision.title.clone() {
+            extraction.title = title;
+        }
+        if let Some(company_name) = ai_decision.company_name.clone() {
+            extraction.company = company_name;
+        }
+        if let Some(location_text) = ai_decision.location_text.clone() {
+            extraction.location = Some(location_text);
+        }
+        if let Some(employment_type) = ai_decision.employment_type.clone() {
+            extraction.employment_type = Some(employment_type_to_string(&employment_type));
+        }
+        if let Some(description) = ai_decision.description.clone() {
+            extraction.description = description;
+        }
+        let ai_requirements = flatten_requirements(&ai_decision.requirements);
+        if !ai_requirements.is_empty() {
+            extraction.requirements = ai_requirements;
+        }
+        if let Some(company_summary) = ai_decision.company_summary.clone() {
+            extraction.company_summary = Some(company_summary);
+        }
+        if let Some(company_size_text) = ai_decision.company_size_text.clone() {
+            extraction.company_size = Some(company_size_to_string(&company_size_text));
+        }
     }
 
     if extraction.title.trim().is_empty() {
@@ -960,10 +1186,7 @@ async fn process_opened_tab(
         bail!("extraction missing title after fallback");
     }
 
-    let hard_reason = if matches!(
-        ai_decision.visa_policy_text,
-        Some(VisaPolicy::VisaNotSponsored)
-    ) {
+    let hard_reason = if ai_visa_not_sponsored {
         Some("explicit_no_visa_or_sponsorship".to_string())
     } else {
         policy::hard_exclusion(&cfg.filters, &raw_description, &raw_requirements)
@@ -1003,7 +1226,11 @@ async fn process_opened_tab(
 
         let (_job_id, is_new) = deps.storage.upsert_job(run_id, &record).await?;
         info!(event = "hard_exclusion_applied", reason = %hard_reason, is_new);
-        return Ok((is_new, "not_opportunity".to_string()));
+        return Ok(SeedProcessResult {
+            is_new,
+            status: "not_opportunity".to_string(),
+            report_row: report_row_from_record(&record),
+        });
     }
 
     let dedupe_key = job_page::dedupe_key(
@@ -1011,7 +1238,16 @@ async fn process_opened_tab(
         &extraction.company,
         &extraction.title,
     );
-    let status_reason = if seed.pre_match_reason.is_empty() {
+    let status_reason = if dry_run {
+        if seed.pre_match_reason.is_empty() {
+            "Dry run: AI skipped; passed hard filters".to_string()
+        } else {
+            format!(
+                "Dry run: AI skipped; passed hard filters; pre_match={}",
+                seed.pre_match_reason
+            )
+        }
+    } else if seed.pre_match_reason.is_empty() {
         "Passed hard filters".to_string()
     } else {
         format!("Passed hard filters; pre_match={}", seed.pre_match_reason)
@@ -1047,7 +1283,11 @@ async fn process_opened_tab(
     let (_job_id, is_new) = deps.storage.upsert_job(run_id, &record).await?;
     debug!(event = "job_persisted", status = "opportunity", is_new);
 
-    Ok((is_new, "opportunity".to_string()))
+    Ok(SeedProcessResult {
+        is_new,
+        status: "opportunity".to_string(),
+        report_row: report_row_from_record(&record),
+    })
 }
 
 #[tracing::instrument(
@@ -1060,6 +1300,7 @@ async fn process_opened_tab_dev(
     deps: &DevScanDeps<'_>,
     seed: &JobSeed,
     tab: &BrowserPageTab,
+    dry_run: bool,
 ) -> Result<ReportRow> {
     let ws = tab
         .websocket_debugger_url
@@ -1081,45 +1322,57 @@ async fn process_opened_tab_dev(
         bail!("detail extraction missing aboutTheJob DOM element");
     }
 
-    let ai_input = AiInput { dom_element };
-    let ai_decision = deps
-        .ai
-        .classify(&ai_input)
-        .await
-        .context("ai extraction failed")?
-        .sanitized();
-    let language_text = ai_decision.language.clone();
-    let work_mode_text = ai_decision.work_mode.as_ref().map(work_mode_to_string);
-    let compensation_text = ai_decision.compensation_text.clone();
-    let visa_policy_text = ai_decision
-        .visa_policy_text
-        .as_ref()
-        .map(visa_policy_to_string);
+    let mut language_text: Option<String> = None;
+    let mut work_mode_text: Option<String> = None;
+    let mut compensation_text: Option<String> = None;
+    let mut visa_policy_text: Option<String> = None;
+    let mut ai_visa_not_sponsored = false;
 
-    if let Some(title) = ai_decision.title.clone() {
-        extraction.title = title;
-    }
-    if let Some(company_name) = ai_decision.company_name.clone() {
-        extraction.company = company_name;
-    }
-    if let Some(location_text) = ai_decision.location_text.clone() {
-        extraction.location = Some(location_text);
-    }
-    if let Some(employment_type) = ai_decision.employment_type.clone() {
-        extraction.employment_type = Some(employment_type_to_string(&employment_type));
-    }
-    if let Some(description) = ai_decision.description.clone() {
-        extraction.description = description;
-    }
-    let ai_requirements = flatten_requirements(&ai_decision.requirements);
-    if !ai_requirements.is_empty() {
-        extraction.requirements = ai_requirements;
-    }
-    if let Some(company_summary) = ai_decision.company_summary.clone() {
-        extraction.company_summary = Some(company_summary);
-    }
-    if let Some(company_size_text) = ai_decision.company_size_text.clone() {
-        extraction.company_size = Some(company_size_to_string(&company_size_text));
+    if !dry_run {
+        let ai_input = AiInput { dom_element };
+        let ai_decision = deps
+            .ai
+            .classify(&ai_input)
+            .await
+            .context("ai extraction failed")?
+            .sanitized();
+        language_text = ai_decision.language.clone();
+        work_mode_text = ai_decision.work_mode.as_ref().map(work_mode_to_string);
+        compensation_text = ai_decision.compensation_text.clone();
+        visa_policy_text = ai_decision
+            .visa_policy_text
+            .as_ref()
+            .map(visa_policy_to_string);
+        ai_visa_not_sponsored = matches!(
+            ai_decision.visa_policy_text,
+            Some(VisaPolicy::VisaNotSponsored)
+        );
+
+        if let Some(title) = ai_decision.title.clone() {
+            extraction.title = title;
+        }
+        if let Some(company_name) = ai_decision.company_name.clone() {
+            extraction.company = company_name;
+        }
+        if let Some(location_text) = ai_decision.location_text.clone() {
+            extraction.location = Some(location_text);
+        }
+        if let Some(employment_type) = ai_decision.employment_type.clone() {
+            extraction.employment_type = Some(employment_type_to_string(&employment_type));
+        }
+        if let Some(description) = ai_decision.description.clone() {
+            extraction.description = description;
+        }
+        let ai_requirements = flatten_requirements(&ai_decision.requirements);
+        if !ai_requirements.is_empty() {
+            extraction.requirements = ai_requirements;
+        }
+        if let Some(company_summary) = ai_decision.company_summary.clone() {
+            extraction.company_summary = Some(company_summary);
+        }
+        if let Some(company_size_text) = ai_decision.company_size_text.clone() {
+            extraction.company_size = Some(company_size_to_string(&company_size_text));
+        }
     }
 
     if extraction.title.trim().is_empty() {
@@ -1139,10 +1392,7 @@ async fn process_opened_tab_dev(
         bail!("extraction missing title after fallback");
     }
 
-    let hard_reason = if matches!(
-        ai_decision.visa_policy_text,
-        Some(VisaPolicy::VisaNotSponsored)
-    ) {
+    let hard_reason = if ai_visa_not_sponsored {
         Some("explicit_no_visa_or_sponsorship".to_string())
     } else {
         policy::hard_exclusion(&cfg.filters, &raw_description, &raw_requirements)
@@ -1151,6 +1401,7 @@ async fn process_opened_tab_dev(
     if let Some(hard_reason) = hard_reason {
         return Ok(ReportRow {
             title: extraction.title,
+            source_page_index: seed.page_index,
             company: Some(extraction.company),
             canonical_url: extraction.canonical_url,
             status: "not_opportunity".to_string(),
@@ -1169,7 +1420,16 @@ async fn process_opened_tab_dev(
         });
     }
 
-    let summary = if seed.pre_match_reason.is_empty() {
+    let summary = if dry_run {
+        if seed.pre_match_reason.is_empty() {
+            "Dry run: AI skipped; passed hard filters".to_string()
+        } else {
+            format!(
+                "Dry run: AI skipped; passed hard filters; pre_match={}",
+                seed.pre_match_reason
+            )
+        }
+    } else if seed.pre_match_reason.is_empty() {
         "Passed hard filters".to_string()
     } else {
         format!("Passed hard filters; pre_match={}", seed.pre_match_reason)
@@ -1177,6 +1437,7 @@ async fn process_opened_tab_dev(
 
     Ok(ReportRow {
         title: extraction.title,
+        source_page_index: seed.page_index,
         company: Some(extraction.company),
         canonical_url: extraction.canonical_url,
         status: "opportunity".to_string(),
@@ -1674,6 +1935,61 @@ fn sanitize_error_message(raw: &str) -> String {
     }
 
     out
+}
+
+fn build_rejected_report_row(
+    title: String,
+    canonical_url: String,
+    source_page_index: i64,
+    reason: String,
+) -> ReportRow {
+    ReportRow {
+        title,
+        source_page_index,
+        company: None,
+        canonical_url,
+        status: "not_opportunity".to_string(),
+        summary: reason,
+        location: None,
+        language: None,
+        work_mode: None,
+        employment_type: None,
+        posted_text: None,
+        compensation_text: None,
+        visa_policy_text: None,
+        description: None,
+        company_summary: None,
+        company_size: None,
+        requirements: vec![],
+    }
+}
+
+fn report_row_from_record(record: &JobRecord) -> ReportRow {
+    ReportRow {
+        title: record.title.clone(),
+        source_page_index: record.source_page_index,
+        company: Some(record.company.clone()),
+        canonical_url: record.canonical_url.clone(),
+        status: record.status.as_str().to_string(),
+        summary: record.status_reason.clone(),
+        location: record.location.clone(),
+        language: record.language.clone(),
+        work_mode: record.work_mode.clone(),
+        employment_type: record.employment_type.clone(),
+        posted_text: record.posted_text.clone(),
+        compensation_text: record.compensation_text.clone(),
+        visa_policy_text: record.visa_policy_text.clone(),
+        description: Some(record.description.clone()),
+        company_summary: Some(record.company_summary.clone()),
+        company_size: record.company_size.clone(),
+        requirements: record.requirements.clone(),
+    }
+}
+
+fn next_scan_order(next_order_index: &mut usize) -> usize {
+    let order = *next_order_index;
+    *next_order_index += 1;
+    order
 }
 
 #[cfg(test)]

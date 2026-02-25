@@ -96,6 +96,7 @@ pub struct JobRecord {
 #[derive(Debug, Clone)]
 pub struct ReportRow {
     pub title: String,
+    pub source_page_index: i64,
     pub company: Option<String>,
     pub canonical_url: String,
     pub status: String,

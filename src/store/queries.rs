@@ -183,7 +183,7 @@ pub async fn upsert_job(pool: &SqlitePool, run_id: i64, job: &JobRecord) -> Resu
 
 pub async fn load_report_rows(pool: &SqlitePool, run_id: i64) -> Result<Vec<ReportRow>> {
     let rows = sqlx::query(
-        "SELECT j.title, j.company, j.canonical_url, j.status, j.status_reason, j.location, j.language, j.work_mode, j.employment_type, j.posted_text, j.compensation_text, j.visa_policy_text, j.description, j.requirements_json, j.company_summary, j.company_size FROM run_job_results r JOIN jobs j ON j.id = r.job_id WHERE r.run_id = ? ORDER BY r.id ASC",
+        "SELECT j.title, j.source_page_index, j.company, j.canonical_url, j.status, j.status_reason, j.location, j.language, j.work_mode, j.employment_type, j.posted_text, j.compensation_text, j.visa_policy_text, j.description, j.requirements_json, j.company_summary, j.company_size FROM run_job_results r JOIN jobs j ON j.id = r.job_id WHERE r.run_id = ? ORDER BY r.id ASC",
     )
     .bind(run_id)
     .fetch_all(pool)
@@ -198,6 +198,7 @@ pub async fn load_report_rows(pool: &SqlitePool, run_id: i64) -> Result<Vec<Repo
             serde_json::from_str::<Vec<String>>(&requirements_json).unwrap_or_default();
         out.push(ReportRow {
             title: row.get("title"),
+            source_page_index: row.get("source_page_index"),
             company: row.get("company"),
             canonical_url: row.get("canonical_url"),
             status: row.get("status"),
