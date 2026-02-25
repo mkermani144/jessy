@@ -9,6 +9,8 @@ cargo run -- chrome-debug --config config/profile.yaml
 cargo run -- doctor --config config/profile.yaml
 cargo run -- scan --config config/profile.yaml
 cargo run -- scan-dev --config config/profile.yaml
+cargo run -- scan --dry-run --config config/profile.yaml
+cargo run -- scan-dev --dry-run --config config/profile.yaml
 cargo run -- cleanup --config config/profile.yaml
 cargo run -- cleanup --config config/profile.yaml --reset-history
 ```
@@ -18,7 +20,9 @@ cargo run -- cleanup --config config/profile.yaml --reset-history
 - `chrome-debug`: ensure dedicated debug Chrome profile/session is available and open missing startup tabs from `chrome.startup_urls`.
 - `doctor`: browser + SQLite + OpenAI health checks.
 - `scan`: full job scan pipeline and report rendering.
+- `scan --dry-run`: disables AI classification calls; runs DOM extraction + deterministic filters only.
 - `scan-dev`: dev-only lightweight scan (ignores DB, scans current search page, prints reject reasons too).
+- `scan-dev --dry-run`: same as above, with AI classification disabled.
 - `cleanup`: retention cleanup only.
 - `cleanup --reset-history`: clears full dedupe/history state.
 
@@ -46,6 +50,7 @@ Core run events:
 - `tab_discovery`
 - `search_page_result` (`debug` level)
 - `seed_done` or `seed_failed`
+- `failed_jobs_after_extraction` + `failed_job_after_extraction`
 - `run_done`
 - `openai_unload_not_required`
 

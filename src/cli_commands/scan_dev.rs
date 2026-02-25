@@ -10,7 +10,7 @@ use crate::{
 
 use super::{shared::build_ai_classifier, use_cases::scan};
 
-pub async fn run(cfg: &AppConfig, browser: &ChromeBrowser) -> Result<()> {
+pub async fn run(cfg: &AppConfig, browser: &ChromeBrowser, dry_run: bool) -> Result<()> {
     let ai = build_ai_classifier(cfg);
     let reporter = TerminalReporter;
     let platform_registry = PlatformRegistry::new_default();
@@ -21,5 +21,5 @@ pub async fn run(cfg: &AppConfig, browser: &ChromeBrowser) -> Result<()> {
         platform_registry: &platform_registry,
     };
 
-    scan::scan_dev(cfg, &deps).await
+    scan::scan_dev(cfg, &deps, dry_run).await
 }

@@ -21,9 +21,17 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Scan,
+    Scan {
+        /// Skip AI classification calls; extraction + deterministic filters only.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     #[command(name = "scan-dev")]
-    ScanDev,
+    ScanDev {
+        /// Skip AI classification calls; extraction + deterministic filters only.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     Doctor,
     #[command(name = "chrome-debug", alias = "chrome")]
     ChromeDebug,
@@ -42,8 +50,8 @@ pub async fn run() -> Result<()> {
     let browser = ChromeBrowser::new(cfg.chrome.clone());
 
     match cli.command {
-        Command::Scan => cli_commands::scan::run(&cfg, &browser).await,
-        Command::ScanDev => cli_commands::scan_dev::run(&cfg, &browser).await,
+        Command::Scan { dry_run } => cli_commands::scan::run(&cfg, &browser, dry_run).await,
+        Command::ScanDev { dry_run } => cli_commands::scan_dev::run(&cfg, &browser, dry_run).await,
         Command::Doctor => cli_commands::doctor::run(&cfg, &browser).await,
         Command::ChromeDebug => cli_commands::chrome_debug::run(&cfg, &browser).await,
         Command::Cleanup { reset_history } => cli_commands::cleanup::run(&cfg, reset_history).await,

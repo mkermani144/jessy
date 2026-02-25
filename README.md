@@ -75,12 +75,14 @@ cargo run -- chrome-debug --config config/profile.yaml
 
 ```bash
 cargo run -- scan --config config/profile.yaml
+cargo run -- scan --dry-run --config config/profile.yaml
 ```
 
 Dev-only sample scan (no DB, whole current search page):
 
 ```bash
 cargo run -- scan-dev --config config/profile.yaml
+cargo run -- scan-dev --dry-run --config config/profile.yaml
 ```
 
 7. Cleanup old records:
