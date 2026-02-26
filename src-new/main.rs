@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use jessy_load::{LoadRunInput, LoadSeed, LoadService};
+use jessy_prefilter::{PrefilterRunInput, PrefilterService};
 
 mod outbound;
 
@@ -27,6 +28,16 @@ enum Command {
         source_ref: String,
         #[arg(long)]
         source_cursor: Option<String>,
+    },
+    Prefilter {
+        #[arg(long)]
+        platform: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long, default_value = "manual_prefilter")]
+        reason: String,
+        #[arg(long = "avoid-word")]
+        avoid_words_in_title: Vec<String>,
     },
 }
 
@@ -55,10 +66,31 @@ async fn main() -> Result<()> {
                 })
                 .collect::<Vec<_>>();
 
-            let repo = outbound::load_sqlite::SqliteLoadRepo::new(cli.db_path);
+            let repo = outbound::sqlite_repo::SqliteRepo::new(cli.db_path);
             let service = LoadService::new(repo);
             let out = service.run(LoadRunInput { seeds, reason }).await?;
             println!("load processed={}", out.processed);
+        }
+        Command::Prefilter {
+            platform,
+            limit,
+            reason,
+            avoid_words_in_title,
+        } => {
+            let repo = outbound::sqlite_repo::SqliteRepo::new(cli.db_path);
+            let service = PrefilterService::new(repo);
+            let out = service
+                .run(PrefilterRunInput {
+                    platform_filter: platform,
+                    limit,
+                    reason,
+                    avoid_words_in_title,
+                })
+                .await?;
+            println!(
+                "prefilter selected={} processed={} passed={} rejected={}",
+                out.selected, out.processed, out.passed, out.rejected
+            );
         }
     }
 

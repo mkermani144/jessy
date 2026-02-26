@@ -45,6 +45,7 @@ urlencoding = "2.1"
 
 rig = { package = "rig-core", version = "0.31.0" }
 jessy-load = { path = "jessy-load" }
+jessy-prefilter = { path = "jessy-prefilter" }
 
 [dev-dependencies]
 tempfile = "3.13"

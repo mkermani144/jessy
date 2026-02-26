@@ -3,16 +3,17 @@ use std::{path::Path, str::FromStr};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use jessy_load::{LoadPreparedRecord, LoadRepo};
+use jessy_prefilter::{PrefilterCandidate, PrefilterRepo, PrefilterSelection, PrefilterTransition};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Executor, Row, SqlitePool,
 };
 
-pub struct SqliteLoadRepo {
+pub struct SqliteRepo {
     db_path: String,
 }
 
-impl SqliteLoadRepo {
+impl SqliteRepo {
     pub fn new(db_path: impl Into<String>) -> Self {
         Self {
             db_path: db_path.into(),
@@ -45,7 +46,7 @@ impl SqliteLoadRepo {
     }
 }
 
-impl LoadRepo for SqliteLoadRepo {
+impl LoadRepo for SqliteRepo {
     fn ensure_ready(&self) -> impl std::future::Future<Output = Result<()>> + Send {
         async move {
             let pool = self.connect().await?;
@@ -111,6 +112,76 @@ impl LoadRepo for SqliteLoadRepo {
             .context("failed upserting loaded seed into jobs")?;
 
             Ok(())
+        }
+    }
+}
+
+impl PrefilterRepo for SqliteRepo {
+    fn ensure_ready(&self) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            let pool = self.connect().await?;
+            migrate(&pool).await
+        }
+    }
+
+    fn list_load_ready<'a>(
+        &'a self,
+        selection: &'a PrefilterSelection,
+    ) -> impl std::future::Future<Output = Result<Vec<PrefilterCandidate>>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let platform_filter = selection.platform_filter.as_deref();
+            let rows = sqlx::query(
+                "SELECT id,
+                        COALESCE(platform, 'unknown') AS platform,
+                        COALESCE(title, '') AS title
+                 FROM jobs
+                 WHERE current_stage = ?
+                   AND (? IS NULL OR platform = ?)
+                 ORDER BY id ASC
+                 LIMIT ?",
+            )
+            .bind("load")
+            .bind(platform_filter)
+            .bind(platform_filter)
+            .bind(selection.limit as i64)
+            .fetch_all(&pool)
+            .await
+            .context("failed selecting load-ready jobs")?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| PrefilterCandidate {
+                    id: row.get("id"),
+                    platform: row.get("platform"),
+                    title: row.get("title"),
+                })
+                .collect())
+        }
+    }
+
+    fn apply_prefilter_transition<'a>(
+        &'a self,
+        transition: &'a PrefilterTransition,
+    ) -> impl std::future::Future<Output = Result<bool>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let now = Utc::now().to_rfc3339();
+            let res = sqlx::query(
+                "UPDATE jobs
+                 SET current_stage = ?, status_meta = ?, last_seen = ?
+                 WHERE id = ? AND current_stage = ?",
+            )
+            .bind(transition.current_stage.as_str())
+            .bind(&transition.status_meta)
+            .bind(&now)
+            .bind(transition.id)
+            .bind("load")
+            .execute(&pool)
+            .await
+            .context("failed applying prefilter transition")?;
+
+            Ok(res.rows_affected() > 0)
         }
     }
 }
