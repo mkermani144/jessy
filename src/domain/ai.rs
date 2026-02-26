@@ -59,7 +59,6 @@ pub enum CompanySize {
 /// Structured extractor output used by orchestration layers.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct AiDecision {
-    pub title: Option<String>,
     pub company_name: Option<String>,
     pub location_text: Option<String>,
     pub language: Option<String>,
@@ -76,7 +75,6 @@ pub struct AiDecision {
 impl AiDecision {
     /// Normalizes whitespace and requirement lists to keep downstream behavior stable.
     pub fn sanitized(mut self) -> Self {
-        self.title = normalize_opt(self.title.take());
         self.company_name = normalize_opt(self.company_name.take());
         self.location_text = normalize_opt(self.location_text.take());
         self.language = normalize_language_opt(self.language.take());

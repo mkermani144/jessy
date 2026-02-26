@@ -66,6 +66,7 @@ For each seed:
 - Call platform adapter `extract_job_detail()` with retry.
 - Extraction/parsing details stay inside platform-owned extractors.
 - Normalize through `extract::job_page::from_snapshot`.
+- Keep the search-card title as authoritative when present.
 - Require non-empty `about_job_dom` (retry on selector delays).
 - Fill fallback title/company if missing.
 - Close temporary tab.
@@ -74,7 +75,7 @@ For each seed:
 
 - Build `AiInput` with one field: the extracted `about_job_dom`.
 - Call `AiClassifier::classify()` (Rig provider adapter).
-- AI returns structured fields only (title/company/location/requirements/etc).
+- AI returns structured fields only (company/location/requirements/etc); title is not AI-owned.
 - Each job is extracted independently (no shared conversation state).
 
 ## 9) Hard exclusions

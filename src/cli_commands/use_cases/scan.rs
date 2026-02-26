@@ -1091,6 +1091,11 @@ async fn process_opened_tab(
     let snapshot = extract_with_retry(session.as_mut(), adapter.as_ref()).await?;
     let dom_element = snapshot.about_job_dom.clone();
     let mut extraction = job_page::from_snapshot(snapshot);
+    extraction.title = resolve_job_title(
+        seed.pre_title.as_deref(),
+        &extraction.title,
+        &extraction.canonical_url,
+    );
     let raw_description = extraction.description.clone();
     let raw_requirements = extraction.requirements.clone();
 
@@ -1142,9 +1147,6 @@ async fn process_opened_tab(
             Some(VisaPolicy::VisaNotSponsored)
         );
 
-        if let Some(title) = ai_decision.title.clone() {
-            extraction.title = title;
-        }
         if let Some(company_name) = ai_decision.company_name.clone() {
             extraction.company = company_name;
         }
@@ -1315,6 +1317,11 @@ async fn process_opened_tab_dev(
     let snapshot = extract_with_retry(session.as_mut(), adapter.as_ref()).await?;
     let dom_element = snapshot.about_job_dom.clone();
     let mut extraction = job_page::from_snapshot(snapshot);
+    extraction.title = resolve_job_title(
+        seed.pre_title.as_deref(),
+        &extraction.title,
+        &extraction.canonical_url,
+    );
     let raw_description = extraction.description.clone();
     let raw_requirements = extraction.requirements.clone();
 
@@ -1348,9 +1355,6 @@ async fn process_opened_tab_dev(
             Some(VisaPolicy::VisaNotSponsored)
         );
 
-        if let Some(title) = ai_decision.title.clone() {
-            extraction.title = title;
-        }
         if let Some(company_name) = ai_decision.company_name.clone() {
             extraction.company = company_name;
         }
@@ -1866,6 +1870,26 @@ fn infer_title_from_url(url: &str) -> String {
     "Job Posting".to_string()
 }
 
+fn resolve_job_title(
+    seed_title: Option<&str>,
+    extracted_title: &str,
+    canonical_url: &str,
+) -> String {
+    if let Some(card_title) = seed_title
+        .map(job_page::normalize_whitespace)
+        .filter(|title| !title.is_empty())
+    {
+        return card_title;
+    }
+
+    let normalized = job_page::normalize_whitespace(extracted_title);
+    if !normalized.is_empty() {
+        return normalized;
+    }
+
+    infer_title_from_url(canonical_url)
+}
+
 async fn wait_for_page_ready(session: &mut dyn BrowserSession, max_wait_ms: u64) {
     let mut elapsed = 0u64;
     while elapsed < max_wait_ms {
@@ -2130,5 +2154,28 @@ mod tests {
 
         let action = linkedin_prefilter_action(&filters_with_recent_days(2), &card);
         assert!(action.is_none());
+    }
+
+    #[test]
+    fn resolve_job_title_prefers_seed_card_title() {
+        let resolved = resolve_job_title(
+            Some(" Senior   Engineer "),
+            "Principal Engineer",
+            "https://www.linkedin.com/jobs/view/123",
+        );
+        assert_eq!(resolved, "Senior Engineer");
+    }
+
+    #[test]
+    fn resolve_job_title_falls_back_to_extracted_then_url() {
+        let from_extracted = resolve_job_title(
+            Some("  "),
+            " Staff   Engineer ",
+            "https://example.com/jobs/1",
+        );
+        assert_eq!(from_extracted, "Staff Engineer");
+
+        let from_url = resolve_job_title(None, "   ", "https://www.linkedin.com/jobs/view/123");
+        assert_eq!(from_url, "LinkedIn Job Posting");
     }
 }
