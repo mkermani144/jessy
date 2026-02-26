@@ -3,7 +3,9 @@ use clap::{Parser, Subcommand};
 use jessy_enrich::{EnrichRunInput, EnrichService};
 use jessy_load::{LoadRunInput, LoadSeed, LoadService};
 use jessy_prefilter::{PrefilterRunInput, PrefilterService};
+use jessy_serve::{ServeRunInput, ServeService};
 
+mod inbound;
 mod outbound;
 
 #[derive(Debug, Parser)]
@@ -47,6 +49,16 @@ enum Command {
         limit: usize,
         #[arg(long, default_value = "manual_enrich")]
         reason: String,
+    },
+    Serve {
+        #[arg(long)]
+        platform: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long, default_value_t = false)]
+        no_fzf: bool,
     },
 }
 
@@ -121,6 +133,23 @@ async fn main() -> Result<()> {
                 "enrich selected={} processed={} succeeded={} failed={}",
                 out.selected, out.processed, out.succeeded, out.failed
             );
+        }
+        Command::Serve {
+            platform,
+            limit,
+            query,
+            no_fzf,
+        } => {
+            let repo = outbound::sqlite_repo::SqliteRepo::new(cli.db_path);
+            let channel = inbound::serve_terminal::TerminalChannel::new(!no_fzf);
+            let service = ServeService::new(repo, channel);
+            service
+                .run(ServeRunInput {
+                    platform_filter: platform,
+                    limit,
+                    query,
+                })
+                .await?;
         }
     }
 

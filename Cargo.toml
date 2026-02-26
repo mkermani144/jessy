@@ -47,6 +47,7 @@ rig = { package = "rig-core", version = "0.31.0" }
 jessy-load = { path = "jessy-load" }
 jessy-enrich = { path = "jessy-enrich" }
 jessy-prefilter = { path = "jessy-prefilter" }
+jessy-serve = { path = "jessy-serve" }
 
 [dev-dependencies]
 tempfile = "3.13"

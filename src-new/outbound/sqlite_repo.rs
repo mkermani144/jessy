@@ -5,6 +5,7 @@ use chrono::Utc;
 use jessy_enrich::{EnrichCandidate, EnrichRepo, EnrichSelection, EnrichTransition};
 use jessy_load::{LoadPreparedRecord, LoadRepo};
 use jessy_prefilter::{PrefilterCandidate, PrefilterRepo, PrefilterSelection, PrefilterTransition};
+use jessy_serve::{ServeRepo, ServeRow, ServeSelection};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Executor, Row, SqlitePool,
@@ -267,6 +268,61 @@ impl EnrichRepo for SqliteRepo {
             .context("failed applying enrich transition")?;
 
             Ok(res.rows_affected() > 0)
+        }
+    }
+}
+
+impl ServeRepo for SqliteRepo {
+    fn ensure_ready(&self) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            let pool = self.connect().await?;
+            migrate(&pool).await
+        }
+    }
+
+    fn list_enriched<'a>(
+        &'a self,
+        selection: &'a ServeSelection,
+    ) -> impl std::future::Future<Output = Result<Vec<ServeRow>>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let platform_filter = selection.platform_filter.as_deref();
+            let rows = sqlx::query(
+                "SELECT id,
+                        COALESCE(platform, 'unknown') AS platform,
+                        COALESCE(title, '') AS title,
+                        COALESCE(company, '') AS company,
+                        canonical_url,
+                        COALESCE(status_meta, '') AS status_meta,
+                        COALESCE(company_summary, '') AS company_summary,
+                        COALESCE(description, '') AS description
+                 FROM jobs
+                 WHERE current_stage = ?
+                   AND (? IS NULL OR platform = ?)
+                 ORDER BY id DESC
+                 LIMIT ?",
+            )
+            .bind("enrich")
+            .bind(platform_filter)
+            .bind(platform_filter)
+            .bind(selection.limit as i64)
+            .fetch_all(&pool)
+            .await
+            .context("failed selecting enrich-ready jobs for serve")?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| ServeRow {
+                    id: row.get("id"),
+                    platform: row.get("platform"),
+                    title: row.get("title"),
+                    company: row.get("company"),
+                    canonical_url: row.get("canonical_url"),
+                    status_meta: row.get("status_meta"),
+                    company_summary: row.get("company_summary"),
+                    description: row.get("description"),
+                })
+                .collect())
         }
     }
 }

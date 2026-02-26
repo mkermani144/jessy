@@ -7,3 +7,4 @@ license = "MIT"
 
 [dependencies]
 jessy-core = { path = "../jessy-core" }
+anyhow = "1.0"
