@@ -32,6 +32,21 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_canonical_url ON jobs(canonical_url);
 CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen);
 
+CREATE TABLE IF NOT EXISTS load_seeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL,
+    canonical_url TEXT NOT NULL,
+    source_ref TEXT NOT NULL,
+    source_cursor TEXT,
+    emitted_at TEXT NOT NULL,
+    consumed_at TEXT,
+    current_stage TEXT NOT NULL,
+    status_meta TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_load_seeds_pending ON load_seeds(consumed_at, id);
+
 CREATE TABLE IF NOT EXISTS run_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,

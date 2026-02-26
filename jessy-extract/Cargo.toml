@@ -7,3 +7,7 @@ license = "MIT"
 
 [dependencies]
 jessy-core = { path = "../jessy-core" }
+anyhow = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.48", features = ["macros", "rt"] }

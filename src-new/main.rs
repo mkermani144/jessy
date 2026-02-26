@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use jessy_enrich::{EnrichRunInput, EnrichService};
+use jessy_extract::{ExtractRunInput, ExtractService, ExtractSource};
 use jessy_load::{LoadRunInput, LoadSeed, LoadService};
 use jessy_prefilter::{PrefilterRunInput, PrefilterService};
 use jessy_serve::{ServeRunInput, ServeService};
@@ -19,18 +20,33 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Extract,
-    Load {
-        #[arg(long = "url", required = true)]
-        urls: Vec<String>,
+    Extract {
         #[arg(long, required = true)]
         platform: String,
+        #[arg(long = "source-ref", required = true)]
+        source_refs: Vec<String>,
+        #[arg(long)]
+        source_cursor: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        max_pages_per_source: usize,
+        #[arg(long, default_value_t = 50)]
+        max_links_per_page: usize,
+        #[arg(long, default_value = "manual_extract")]
+        reason: String,
+    },
+    Load {
+        #[arg(long = "url")]
+        urls: Vec<String>,
+        #[arg(long)]
+        platform: Option<String>,
         #[arg(long, default_value = "manual_load")]
         reason: String,
         #[arg(long, default_value = "manual://input")]
         source_ref: String,
         #[arg(long)]
         source_cursor: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        pending_limit: usize,
     },
     Prefilter {
         #[arg(long)]
@@ -67,8 +83,38 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Extract => {
-            bail!("extract not implemented yet (crawl-only step planned); use `load` for now");
+        Command::Extract {
+            platform,
+            source_refs,
+            source_cursor,
+            max_pages_per_source,
+            max_links_per_page,
+            reason,
+        } => {
+            let sources = source_refs
+                .into_iter()
+                .map(|source_ref| ExtractSource {
+                    platform: platform.clone(),
+                    source_ref,
+                    source_cursor: source_cursor.clone(),
+                })
+                .collect::<Vec<_>>();
+
+            let repo = outbound::sqlite_repo::SqliteRepo::new(cli.db_path);
+            let crawler = outbound::extract_crawler::HttpExtractCrawler::new()?;
+            let service = ExtractService::new(repo, crawler);
+            let out = service
+                .run(ExtractRunInput {
+                    sources,
+                    max_pages_per_source,
+                    max_links_per_page,
+                    reason,
+                })
+                .await?;
+            println!(
+                "extract sources={} pages={} discovered={} emitted={}",
+                out.selected_sources, out.crawled_pages, out.discovered, out.emitted
+            );
         }
         Command::Load {
             urls,
@@ -76,11 +122,15 @@ async fn main() -> Result<()> {
             reason,
             source_ref,
             source_cursor,
+            pending_limit,
         } => {
+            if !urls.is_empty() && platform.is_none() {
+                bail!("load --platform is required when --url is provided");
+            }
             let seeds = urls
                 .into_iter()
                 .map(|canonical_url| LoadSeed {
-                    platform: platform.clone(),
+                    platform: platform.clone().unwrap_or_default(),
                     canonical_url,
                     source_ref: source_ref.clone(),
                     source_cursor: source_cursor.clone(),
@@ -89,7 +139,14 @@ async fn main() -> Result<()> {
 
             let repo = outbound::sqlite_repo::SqliteRepo::new(cli.db_path);
             let service = LoadService::new(repo);
-            let out = service.run(LoadRunInput { seeds, reason }).await?;
+            let out = service
+                .run(LoadRunInput {
+                    seeds,
+                    reason,
+                    platform_filter: platform,
+                    pending_limit,
+                })
+                .await?;
             println!("load processed={}", out.processed);
         }
         Command::Prefilter {

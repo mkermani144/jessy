@@ -3,9 +3,11 @@ use std::{path::Path, str::FromStr};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use jessy_enrich::{EnrichCandidate, EnrichRepo, EnrichSelection, EnrichTransition};
-use jessy_load::{LoadPreparedRecord, LoadRepo};
+use jessy_extract::{ExtractRepo, LoadSeed as ExtractLoadSeed};
+use jessy_load::{LoadPendingSelection, LoadPreparedRecord, LoadRepo, LoadSeed};
 use jessy_prefilter::{PrefilterCandidate, PrefilterRepo, PrefilterSelection, PrefilterTransition};
 use jessy_serve::{ServeRepo, ServeRow, ServeSelection};
+use sha2::{Digest, Sha256};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Executor, Row, SqlitePool,
@@ -53,6 +55,40 @@ impl LoadRepo for SqliteRepo {
         async move {
             let pool = self.connect().await?;
             migrate(&pool).await
+        }
+    }
+
+    fn list_pending_extract_seeds<'a>(
+        &'a self,
+        selection: &'a LoadPendingSelection,
+    ) -> impl std::future::Future<Output = Result<Vec<LoadSeed>>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let platform_filter = selection.platform_filter.as_deref();
+            let rows = sqlx::query(
+                "SELECT platform, canonical_url, source_ref, source_cursor
+                 FROM load_seeds
+                 WHERE consumed_at IS NULL
+                   AND (? IS NULL OR platform = ?)
+                 ORDER BY id ASC
+                 LIMIT ?",
+            )
+            .bind(platform_filter)
+            .bind(platform_filter)
+            .bind(selection.limit as i64)
+            .fetch_all(&pool)
+            .await
+            .context("failed selecting pending extract seeds")?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| LoadSeed {
+                    platform: row.get("platform"),
+                    canonical_url: row.get("canonical_url"),
+                    source_ref: row.get("source_ref"),
+                    source_cursor: row.get("source_cursor"),
+                })
+                .collect())
         }
     }
 
@@ -114,6 +150,77 @@ impl LoadRepo for SqliteRepo {
             .context("failed upserting loaded seed into jobs")?;
 
             Ok(())
+        }
+    }
+
+    fn mark_extract_seed_loaded<'a>(
+        &'a self,
+        dedupe_key: &'a str,
+    ) -> impl std::future::Future<Output = Result<()>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let now = Utc::now().to_rfc3339();
+            sqlx::query(
+                "UPDATE load_seeds
+                 SET consumed_at = ?, status_meta = ?
+                 WHERE dedupe_key = ? AND consumed_at IS NULL",
+            )
+            .bind(&now)
+            .bind("load:consumed")
+            .bind(dedupe_key)
+            .execute(&pool)
+            .await
+            .context("failed marking extract seed as consumed")?;
+            Ok(())
+        }
+    }
+}
+
+impl ExtractRepo for SqliteRepo {
+    fn ensure_ready(&self) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            let pool = self.connect().await?;
+            migrate(&pool).await
+        }
+    }
+
+    fn emit_load_seed<'a>(
+        &'a self,
+        seed: &'a ExtractLoadSeed,
+        reason: &'a str,
+    ) -> impl std::future::Future<Output = Result<bool>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let now = Utc::now().to_rfc3339();
+            let dedupe_key = load_seed_dedupe_key(&seed.platform, &seed.canonical_url);
+            let status_meta = format!("extract:{}:{}", seed.platform, reason);
+
+            let res = sqlx::query(
+                "INSERT INTO load_seeds (
+                    dedupe_key, platform, canonical_url, source_ref, source_cursor,
+                    emitted_at, consumed_at, current_stage, status_meta
+                 ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                 ON CONFLICT(dedupe_key) DO UPDATE SET
+                    source_ref = excluded.source_ref,
+                    source_cursor = excluded.source_cursor,
+                    emitted_at = excluded.emitted_at,
+                    consumed_at = NULL,
+                    current_stage = excluded.current_stage,
+                    status_meta = excluded.status_meta",
+            )
+            .bind(&dedupe_key)
+            .bind(&seed.platform)
+            .bind(&seed.canonical_url)
+            .bind(&seed.source_ref)
+            .bind(&seed.source_cursor)
+            .bind(&now)
+            .bind("extract")
+            .bind(&status_meta)
+            .execute(&pool)
+            .await
+            .context("failed emitting load seed from extract step")?;
+
+            Ok(res.rows_affected() > 0)
         }
     }
 }
@@ -366,4 +473,12 @@ async fn ensure_jobs_column(pool: &SqlitePool, column: &str, sqlite_type: &str) 
         .await
         .with_context(|| format!("failed adding jobs.{column} column"))?;
     Ok(())
+}
+
+fn load_seed_dedupe_key(platform: &str, canonical_url: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(platform.as_bytes());
+    hasher.update(b":");
+    hasher.update(canonical_url.as_bytes());
+    hex::encode(hasher.finalize())
 }

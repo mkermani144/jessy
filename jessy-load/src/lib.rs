@@ -18,6 +18,8 @@ pub struct LoadSeed {
 pub struct LoadRunInput {
     pub seeds: Vec<LoadSeed>,
     pub reason: String,
+    pub platform_filter: Option<String>,
+    pub pending_limit: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -37,11 +39,25 @@ pub struct LoadPreparedRecord {
     pub status_meta: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct LoadPendingSelection {
+    pub platform_filter: Option<String>,
+    pub limit: usize,
+}
+
 pub trait LoadRepo: Send + Sync {
     fn ensure_ready(&self) -> impl Future<Output = Result<()>> + Send;
+    fn list_pending_extract_seeds<'a>(
+        &'a self,
+        selection: &'a LoadPendingSelection,
+    ) -> impl Future<Output = Result<Vec<LoadSeed>>> + Send + 'a;
     fn upsert_loaded<'a>(
         &'a self,
         record: &'a LoadPreparedRecord,
+    ) -> impl Future<Output = Result<()>> + Send + 'a;
+    fn mark_extract_seed_loaded<'a>(
+        &'a self,
+        dedupe_key: &'a str,
     ) -> impl Future<Output = Result<()>> + Send + 'a;
 }
 
@@ -55,19 +71,31 @@ impl<R: LoadRepo> LoadService<R> {
     }
 
     pub async fn run(&self, input: LoadRunInput) -> Result<LoadRunOutput> {
-        if input.seeds.is_empty() {
+        let reason = normalized_reason(&input.reason);
+        let pending_selection =
+            normalized_pending_selection(input.platform_filter, input.pending_limit)?;
+        self.repo.ensure_ready().await?;
+        let seeds = if input.seeds.is_empty() {
+            self.repo
+                .list_pending_extract_seeds(&pending_selection)
+                .await?
+        } else {
+            input.seeds
+        };
+        if seeds.is_empty() {
             return Ok(LoadRunOutput { processed: 0 });
         }
 
-        let reason = normalized_reason(&input.reason);
-        self.repo.ensure_ready().await?;
-        for seed in &input.seeds {
+        for seed in &seeds {
             let record = prepare_record(seed, &reason)?;
             self.repo.upsert_loaded(&record).await?;
+            self.repo
+                .mark_extract_seed_loaded(&record.dedupe_key)
+                .await?;
         }
 
         Ok(LoadRunOutput {
-            processed: input.seeds.len(),
+            processed: seeds.len(),
         })
     }
 }
@@ -119,6 +147,29 @@ fn normalized_reason(reason: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn normalized_pending_selection(
+    platform_filter: Option<String>,
+    pending_limit: usize,
+) -> Result<LoadPendingSelection> {
+    if pending_limit == 0 {
+        return Err(anyhow!("load.pending_limit must be > 0"));
+    }
+
+    let platform_filter = platform_filter.and_then(|value| {
+        let normalized = value.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        }
+    });
+
+    Ok(LoadPendingSelection {
+        platform_filter,
+        limit: pending_limit,
+    })
 }
 
 fn dedupe_key(platform: &str, canonical_url: &str) -> String {
