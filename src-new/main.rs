@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
-use jessy_extract::{ExtractRunInput, ExtractSeed, ExtractService};
+use jessy_load::{LoadRunInput, LoadSeed, LoadService};
 
-mod extract_sqlite;
+mod outbound;
 
 #[derive(Debug, Parser)]
 #[command(name = "jessy-new", version, about = "Jessy pipeline CLI (new wiring)")]
@@ -15,12 +15,13 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Extract {
+    Extract,
+    Load {
         #[arg(long = "url", required = true)]
         urls: Vec<String>,
         #[arg(long, required = true)]
         platform: String,
-        #[arg(long, default_value = "manual_seed")]
+        #[arg(long, default_value = "manual_load")]
         reason: String,
         #[arg(long, default_value = "manual://input")]
         source_ref: String,
@@ -34,7 +35,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::Extract {
+        Command::Extract => {
+            bail!("extract not implemented yet (crawl-only step planned); use `load` for now");
+        }
+        Command::Load {
             urls,
             platform,
             reason,
@@ -43,7 +47,7 @@ async fn main() -> Result<()> {
         } => {
             let seeds = urls
                 .into_iter()
-                .map(|canonical_url| ExtractSeed {
+                .map(|canonical_url| LoadSeed {
                     platform: platform.clone(),
                     canonical_url,
                     source_ref: source_ref.clone(),
@@ -51,10 +55,10 @@ async fn main() -> Result<()> {
                 })
                 .collect::<Vec<_>>();
 
-            let repo = extract_sqlite::SqliteExtractRepo::new(cli.db_path);
-            let service = ExtractService::new(repo);
-            let out = service.run(ExtractRunInput { seeds, reason }).await?;
-            println!("extract processed={}", out.processed);
+            let repo = outbound::load_sqlite::SqliteLoadRepo::new(cli.db_path);
+            let service = LoadService::new(repo);
+            let out = service.run(LoadRunInput { seeds, reason }).await?;
+            println!("load processed={}", out.processed);
         }
     }
 

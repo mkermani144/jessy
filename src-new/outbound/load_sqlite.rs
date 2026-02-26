@@ -2,17 +2,17 @@ use std::{path::Path, str::FromStr};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use jessy_extract::{ExtractPreparedRecord, ExtractRepo};
+use jessy_load::{LoadPreparedRecord, LoadRepo};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
     Executor, Row, SqlitePool,
 };
 
-pub struct SqliteExtractRepo {
+pub struct SqliteLoadRepo {
     db_path: String,
 }
 
-impl SqliteExtractRepo {
+impl SqliteLoadRepo {
     pub fn new(db_path: impl Into<String>) -> Self {
         Self {
             db_path: db_path.into(),
@@ -45,7 +45,7 @@ impl SqliteExtractRepo {
     }
 }
 
-impl ExtractRepo for SqliteExtractRepo {
+impl LoadRepo for SqliteLoadRepo {
     fn ensure_ready(&self) -> impl std::future::Future<Output = Result<()>> + Send {
         async move {
             let pool = self.connect().await?;
@@ -53,9 +53,9 @@ impl ExtractRepo for SqliteExtractRepo {
         }
     }
 
-    fn upsert_extracted<'a>(
+    fn upsert_loaded<'a>(
         &'a self,
-        record: &'a ExtractPreparedRecord,
+        record: &'a LoadPreparedRecord,
     ) -> impl std::future::Future<Output = Result<()>> + Send + 'a {
         async move {
             let pool = self.connect().await?;
@@ -91,7 +91,7 @@ impl ExtractRepo for SqliteExtractRepo {
             .bind(Option::<String>::None)
             .bind(Option::<String>::None)
             .bind(Option::<String>::None)
-            .bind("Pending load step")
+            .bind("Pending prefilter step")
             .bind("[]")
             .bind(&now)
             .bind(&now)
@@ -100,15 +100,15 @@ impl ExtractRepo for SqliteExtractRepo {
             .bind(&record.source_ref)
             .bind(record.legacy_source_page_index)
             .bind("not_opportunity")
-            .bind("Pipeline pending load")
+            .bind("Pipeline pending prefilter")
             .bind(record.current_stage.as_str())
             .bind(&record.status_meta)
-            .bind("Pending load")
-            .bind("Pending load")
+            .bind("Pending prefilter")
+            .bind("Pending prefilter")
             .bind(Option::<String>::None)
             .execute(&pool)
             .await
-            .context("failed upserting extracted seed into jobs")?;
+            .context("failed upserting loaded seed into jobs")?;
 
             Ok(())
         }
@@ -116,7 +116,7 @@ impl ExtractRepo for SqliteExtractRepo {
 }
 
 async fn migrate(pool: &SqlitePool) -> Result<()> {
-    let sql = include_str!("../migrations/001_init.sql");
+    let sql = include_str!("../../migrations/001_init.sql");
 
     for statement in sql.split(";\n") {
         let stmt = statement.trim();
