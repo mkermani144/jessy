@@ -2,6 +2,7 @@ use std::{path::Path, str::FromStr};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use jessy_enrich::{EnrichCandidate, EnrichRepo, EnrichSelection, EnrichTransition};
 use jessy_load::{LoadPreparedRecord, LoadRepo};
 use jessy_prefilter::{PrefilterCandidate, PrefilterRepo, PrefilterSelection, PrefilterTransition};
 use sqlx::{
@@ -180,6 +181,90 @@ impl PrefilterRepo for SqliteRepo {
             .execute(&pool)
             .await
             .context("failed applying prefilter transition")?;
+
+            Ok(res.rows_affected() > 0)
+        }
+    }
+}
+
+impl EnrichRepo for SqliteRepo {
+    fn ensure_ready(&self) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            let pool = self.connect().await?;
+            migrate(&pool).await
+        }
+    }
+
+    fn list_prefilter_ready<'a>(
+        &'a self,
+        selection: &'a EnrichSelection,
+    ) -> impl std::future::Future<Output = Result<Vec<EnrichCandidate>>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let platform_filter = selection.platform_filter.as_deref();
+            let rows = sqlx::query(
+                "SELECT id,
+                        COALESCE(platform, 'unknown') AS platform,
+                        canonical_url,
+                        COALESCE(title, '') AS title,
+                        COALESCE(company, '') AS company,
+                        COALESCE(description, '') AS description
+                 FROM jobs
+                 WHERE current_stage = ?
+                   AND status_meta LIKE ?
+                   AND (? IS NULL OR platform = ?)
+                 ORDER BY id ASC
+                 LIMIT ?",
+            )
+            .bind("prefilter")
+            .bind("%:passed:%")
+            .bind(platform_filter)
+            .bind(platform_filter)
+            .bind(selection.limit as i64)
+            .fetch_all(&pool)
+            .await
+            .context("failed selecting prefilter-ready jobs")?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| EnrichCandidate {
+                    id: row.get("id"),
+                    platform: row.get("platform"),
+                    canonical_url: row.get("canonical_url"),
+                    title: row.get("title"),
+                    company: row.get("company"),
+                    description: row.get("description"),
+                })
+                .collect())
+        }
+    }
+
+    fn apply_enrich_transition<'a>(
+        &'a self,
+        transition: &'a EnrichTransition,
+    ) -> impl std::future::Future<Output = Result<bool>> + Send + 'a {
+        async move {
+            let pool = self.connect().await?;
+            let now = Utc::now().to_rfc3339();
+            let res = sqlx::query(
+                "UPDATE jobs
+                 SET current_stage = ?,
+                     status_meta = ?,
+                     company_summary = ?,
+                     description = COALESCE(?, description),
+                     last_seen = ?
+                 WHERE id = ? AND current_stage = ?",
+            )
+            .bind(transition.current_stage.as_str())
+            .bind(&transition.status_meta)
+            .bind(&transition.company_summary)
+            .bind(&transition.description)
+            .bind(&now)
+            .bind(transition.id)
+            .bind("prefilter")
+            .execute(&pool)
+            .await
+            .context("failed applying enrich transition")?;
 
             Ok(res.rows_affected() > 0)
         }
