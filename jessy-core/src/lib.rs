@@ -49,7 +49,10 @@ impl StageStatusMeta {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Job {
     pub id: i64,
+    pub platform: String,
     pub canonical_url: String,
+    pub source_ref: Option<String>,
+    pub source_cursor: Option<String>,
     pub current_stage: JobStage,
     pub status_meta: Option<StageStatusMeta>,
     pub first_seen: String,
@@ -57,10 +60,19 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn new(id: i64, canonical_url: impl Into<String>, first_seen: String, last_seen: String) -> Self {
+    pub fn new(
+        id: i64,
+        platform: impl Into<String>,
+        canonical_url: impl Into<String>,
+        first_seen: String,
+        last_seen: String,
+    ) -> Self {
         Self {
             id,
+            platform: platform.into(),
             canonical_url: canonical_url.into(),
+            source_ref: None,
+            source_cursor: None,
             current_stage: JobStage::Extract,
             status_meta: None,
             first_seen,
@@ -92,10 +104,12 @@ mod tests {
     fn new_job_defaults_to_extract_stage() {
         let job = Job::new(
             42,
+            "linkedin",
             "https://example.com/jobs/42",
             "2026-02-25T00:00:00Z".to_string(),
             "2026-02-25T00:00:00Z".to_string(),
         );
+        assert_eq!(job.platform, "linkedin");
         assert_eq!(job.current_stage, JobStage::Extract);
         assert!(job.status_meta.is_none());
     }

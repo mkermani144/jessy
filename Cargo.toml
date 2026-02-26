@@ -17,6 +17,10 @@ edition = "2021"
 description = "Read-only job search intelligence assistant"
 license = "MIT"
 
+[[bin]]
+name = "jessy-new"
+path = "src-new/main.rs"
+
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
@@ -40,6 +44,7 @@ url = "2.5"
 urlencoding = "2.1"
 
 rig = { package = "rig-core", version = "0.31.0" }
+jessy-extract = { path = "jessy-extract" }
 
 [dev-dependencies]
 tempfile = "3.13"
