@@ -230,13 +230,35 @@ fn print_card(row: &ReportRow, width: usize) {
 }
 
 fn print_kv(label: &str, value: &str, inner: usize) {
-    if value.trim().is_empty() {
-        print_wrapped_line(&format!("{label}:"), inner);
+    let key = format!("{PRIMARY}{BOLD}{label}:{RESET}");
+    let key_width = label.chars().count() + 1;
+    let value = value.trim();
+
+    if value.is_empty() {
+        print_line_with_padding(&key, key_width, inner);
         return;
     }
 
-    let text = format!("{label}: {value}");
-    print_wrapped_line(&text, inner);
+    let available = inner.saturating_sub(key_width + 1);
+    if available == 0 {
+        print_line_with_padding(&key, key_width, inner);
+        for line in wrap_text(value, inner) {
+            print_line_with_padding(&line, line.chars().count(), inner);
+        }
+        return;
+    }
+
+    let wrapped = wrap_text(value, available);
+    for (idx, line) in wrapped.iter().enumerate() {
+        if idx == 0 {
+            let text = format!("{key} {line}");
+            print_line_with_padding(&text, key_width + 1 + line.chars().count(), inner);
+            continue;
+        }
+
+        let text = format!("{:key_width$} {line}", "");
+        print_line_with_padding(&text, key_width + 1 + line.chars().count(), inner);
+    }
 }
 
 fn print_kv_opt(label: &str, value: Option<&str>, inner: usize) {
@@ -253,16 +275,21 @@ fn print_wrapped_line(text: &str, inner: usize) {
     let lines = wrap_text(&clean, inner);
 
     for line in lines {
-        println!(
-            "{}│{} {:<inner$} │{}{}",
-            PRIMARY,
-            RESET,
-            line,
-            PRIMARY,
-            RESET,
-            inner = inner
-        );
+        print_line_with_padding(&line, line.chars().count(), inner);
     }
+}
+
+fn print_line_with_padding(text: &str, visible_width: usize, inner: usize) {
+    let padding = inner.saturating_sub(visible_width);
+    println!(
+        "{}│{} {}{} │{}",
+        PRIMARY,
+        RESET,
+        text,
+        " ".repeat(padding),
+        PRIMARY
+    );
+    print!("{RESET}");
 }
 
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
