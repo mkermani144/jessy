@@ -211,20 +211,19 @@ fn print_card(row: &ReportRow, width: usize) {
     print_wrapped_line(&format!("{badge} {}", row.title), inner);
     println!("{}├{}┤{}", PRIMARY, "─".repeat(width - 2), RESET);
 
-    print_kv_opt("Company", row.company.as_deref(), inner);
-    print_kv_opt("Location", row.location.as_deref(), inner);
-    print_kv_opt("Language", row.language.as_deref(), inner);
-    print_kv_opt("Work Mode", row.work_mode.as_deref(), inner);
-    print_kv_opt("Employment Type", row.employment_type.as_deref(), inner);
-    print_kv_opt("Posted", row.posted_text.as_deref(), inner);
-    print_kv_opt("Compensation", row.compensation_text.as_deref(), inner);
-    print_kv_opt("Visa Policy", row.visa_policy_text.as_deref(), inner);
-    print_kv("Summary", &row.summary, inner);
-    print_kv("Link", &row.canonical_url, inner);
-    print_kv("Requirements", &requirements_text, inner);
     print_kv_opt("Description", row.description.as_deref(), inner);
+    print_kv("Requirements", &requirements_text, inner);
+    print_kv_opt("Compensation", row.compensation_text.as_deref(), inner);
+    print_kv_opt("Company", row.company.as_deref(), inner);
     print_kv_opt("Company Summary", row.company_summary.as_deref(), inner);
     print_kv_opt("Company Size", row.company_size.as_deref(), inner);
+    print_kv_opt("Location", row.location.as_deref(), inner);
+    print_kv_opt("Visa Policy", row.visa_policy_text.as_deref(), inner);
+    print_kv_opt("Language", row.language.as_deref(), inner);
+    print_kv_opt("Employment Type", row.employment_type.as_deref(), inner);
+    print_kv_opt("Work Mode", row.work_mode.as_deref(), inner);
+    print_kv_opt("Posted", row.posted_text.as_deref(), inner);
+    print_kv("Link", &row.canonical_url, inner);
 
     println!("{}╰{}╯{}", PRIMARY, "─".repeat(width - 2), RESET);
 }
