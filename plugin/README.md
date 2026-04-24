@@ -32,7 +32,7 @@ claude --plugin-dir /absolute/path/to/jessy/plugin
 
 In-session reload after editing plugin files: `/reload-plugins`.
 
-Optional alias for repeated sessions:
+Optional shell alias for repeated sessions:
 
 ```sh
 alias claude-jessy='claude --plugin-dir /absolute/path/to/jessy/plugin --chrome'
@@ -40,6 +40,19 @@ alias claude-jessy='claude --plugin-dir /absolute/path/to/jessy/plugin --chrome'
 
 `--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab open uses
 the attached Chrome session.
+
+### Optional: bare `/jessy` slash command
+
+Claude Code namespaces plugin commands as `/<plugin>:<cmd>`, so the canonical
+full-pass command is `/jessy:run`. If you want `/jessy` (bare) to work too,
+install a user-level command once:
+
+```sh
+bash /absolute/path/to/jessy/plugin/scripts/install_bare_alias.sh
+```
+
+Writes `~/.claude/commands/jessy.md` that delegates to the plugin's skills.
+Idempotent; `--force` to overwrite.
 
 ### Marketplace
 
@@ -162,6 +175,7 @@ plugin/
     scan.md
   scripts/
     db.sh
+    install_bare_alias.sh
     onboard.sh
     render_cards.sh
     schema.sql
