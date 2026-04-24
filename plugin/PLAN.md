@@ -314,6 +314,57 @@ Dev: symlink `plugin/` → `~/.claude/plugins/jessy/`. Later: marketplace ref.
 - Migrating any Rust SQLite rows → skip unless user asks.
 - Nuke Rust tree → after plugin proven.
 
+## Subagents over skills (post-MVP polish)
+
+MVP uses skills only. Skills run in main context → per-card DOM dumps +
+pref + rubric text can bloat scan turns. Flip to subagent fan-out when
+live test shows context pressure.
+
+### Convert to subagent — jessy-scan
+
+Per-card or per-tab fan-out. Skill remains orchestrator; inside the
+per-tab loop, spawn one Task subagent per detail-page extract.
+
+- Subagent gets: canonical URL, prefs (sectioned text), scoring rubric,
+  linkedin skill body.
+- Subagent does: open detail via chrome, read headings, build
+  `req_hard` / `req_nice`, fetch company page, score, build rationale.
+- Subagent returns: single JSON line matching `db.sh insert_job` args
+  (+ company fields for upsert).
+- Main (skill) thread: receives JSON, calls `db.sh upsert_company` then
+  `db.sh insert_job`, tallies summary.
+
+Win: main context stays lean (seen-skip + counts + DB writes only);
+expensive DOM + scoring isolated per card; independent cards can
+parallelize via multiple Task calls in one message.
+
+Trigger condition: flip after live test if scan of ~3 pages × 25 cards
+fills > 40% of main context before report runs. Below that, skill is
+cheaper (no cold-start per card).
+
+### Consider subagent — jessy-learn
+
+Single-shot over ~50 acted-on rows. Usually fine as skill. Flip only if
+pattern cluster reasoning + prefs read + rubric recall fills main
+context enough to degrade the subsequent AskUserQuestion UX.
+
+Spawn one subagent for cluster mining; main thread runs AskUserQuestion
+and Edit on prefs.md.
+
+### Stay skills
+
+- jessy-report — short; renders + asks + marks. Multi-step dialog needs
+  persistent main context (AskUserQuestion + follow-up actions).
+- jessy-cleanup — trivial shell wrapper.
+- platforms/linkedin — reference doc, never executes; skill-as-context
+  is the right shape.
+- config / prefs commands — cheap `$EDITOR` glue.
+
+### Tracking
+
+Apply after current (2026-04-24) code + flow reviews land and after
+first real live-test pass.
+
 ## Implementation order
 
 1. Plugin manifest + minimal `/jessy-config` + `/jessy-prefs` + onboarding.
