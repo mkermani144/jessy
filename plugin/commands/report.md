@@ -5,8 +5,10 @@ disable-model-invocation: true
 
 Run the jessy report flow.
 
-Invoke the `jessy-report` skill end-to-end. Print the rendered cards as-is,
-ask the user which jobs to open, mark `user_action` on the chosen rows
-(picked → opened, candidate-but-not-picked → dismissed; ignored bucket is
-also marked dismissed per the skill's v1 rule). Then print the one-line
-summary `opened N; dismissed M; unseen 0.`.
+1. If `~/.jessy/config.yaml` or `~/.jessy/preferences.md` is missing,
+   invoke the **jessy-onboard** skill first and wait for it to finish.
+2. Invoke the **jessy-report** skill end-to-end. Print the rendered cards
+   as-is. Ask the user which jobs to open. Mark `user_action` on picked
+   and candidate-but-not-picked rows (ignored bucket is also marked
+   dismissed per the skill's v1 rule).
+3. Print the one-line summary `opened N; dismissed M; unseen 0.`.

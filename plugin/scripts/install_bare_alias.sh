@@ -44,10 +44,10 @@ disable-model-invocation: true
 
 Run a full jessy pass:
 
-1. Invoke the `jessy-scan` skill (from the `jessy` plugin). Print its
-   one-line summary.
-2. Invoke the `jessy-report` skill (from the `jessy` plugin) against the
-   rows just inserted.
+1. If `~/.jessy/config.yaml` or `~/.jessy/preferences.md` is missing,
+   invoke the `jessy-onboard` skill first and wait for it to finish.
+2. Invoke the `jessy-scan` skill. Print its one-line summary.
+3. Invoke the `jessy-report` skill against the rows just inserted.
 
 If the jessy plugin is not loaded, tell the user to relaunch with
 `claude --plugin-dir /path/to/jessy/plugin --chrome` and stop.

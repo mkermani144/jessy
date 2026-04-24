@@ -162,6 +162,7 @@ plugin/
   skills/
     jessy-cleanup/SKILL.md
     jessy-learn/SKILL.md
+    jessy-onboard/SKILL.md
     jessy-report/SKILL.md
     jessy-scan/SKILL.md
     platforms/linkedin/SKILL.md
