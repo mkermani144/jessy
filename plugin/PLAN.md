@@ -31,12 +31,14 @@ plugin/
     jessy-learn/SKILL.md
     platforms/linkedin/SKILL.md
   commands/
-    jessy.md            # pipes scan + report
-    jessy-scan.md
-    jessy-report.md
-    jessy-cleanup.md
-    jessy-prefs.md
-    jessy-config.md
+    run.md              # /jessy:run — pipes scan + report
+    scan.md
+    report.md
+    cleanup.md
+    prefs.md
+    config.md
+    learn.md
+    # (plugin names commands as /<plugin>:<cmd>, so no jessy- prefix)
   scripts/
     db.sh               # sqlite3 wrapper: init, insert_job, insert_company, query, cleanup
     render_cards.sh     # box card formatter, bash
@@ -198,9 +200,9 @@ Dealbreaker override: any dealbreaker hit → force score 0 regardless.
 6. Unpicked match/low entries → `user_action='dismissed'`.
 7. If `jobs_since_last_learn >= cadence[next_cadence_idx]` → invoke `jessy-learn`.
 
-### `/jessy` (alias)
+### `/jessy:run` (combined)
 
-Runs `/jessy-scan` then `/jessy-report`.
+Runs `/jessy:scan` then `/jessy:report`.
 
 ### `/jessy-learn`
 
@@ -278,7 +280,7 @@ Shell (bash + sqlite3 + jq). No Python. No deps beyond macOS defaults + `sqlite3
 
 ## Commands (`commands/*.md`)
 
-Each is a short prompt telling Claude to invoke the matching skill. Example `commands/jessy.md`:
+Each is a short prompt telling Claude to invoke the matching skill. Example `commands/run.md`:
 
 ```markdown
 Run jessy: scan new LinkedIn jobs, then render the ranked report.

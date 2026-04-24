@@ -9,7 +9,7 @@ See [`PLAN.md`](PLAN.md) for the v1 design.
 
 | Command          | What |
 |------------------|------|
-| `/jessy`         | Alias: scan + report. |
+| `/jessy:run`     | Full pass: scan + report. |
 | `/jessy:scan`    | Scan open LinkedIn tabs, score, persist. Needs `claude --chrome`. |
 | `/jessy:report`  | Render ranked cards; pick rows to open in Chrome; mark seen. |
 | `/jessy:learn`   | Mine recent open/dismiss patterns; suggest `preferences.md` updates. |
@@ -124,7 +124,7 @@ After `claude --plugin-dir ...`:
 19. `/jessy:report` renders, prompts via AskUserQuestion multi-select,
     opens picked URLs in Chrome, marks picks `opened` and rest `dismissed`,
     prints `opened N; dismissed M; unseen 0`.
-20. `/jessy` runs `/jessy:scan` then `/jessy:report` in one shot.
+20. `/jessy:run` runs `/jessy:scan` then `/jessy:report` in one shot.
 
 ### Round 4
 
@@ -155,7 +155,7 @@ plugin/
   commands/
     cleanup.md
     config.md
-    jessy.md
+    run.md
     learn.md
     prefs.md
     report.md
