@@ -8,6 +8,9 @@ allowed-tools:
   - Bash(test *)
   - Bash(cat *)
   - Read
+  - Agent
+  - mcp__claude-in-chrome
+  - mcp__claude-in-chrome__*
 ---
 
 # jessy-scan

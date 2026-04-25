@@ -9,6 +9,13 @@
       "Bash(cat *)",
       "Bash(mktemp*)",
       "Bash(printf *)",
+      "Bash(grep *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(tr *)",
+      "Bash(sed -n *)",
+      "Bash(rm -f *)",
+      "Skill(jessy-learn)",
       "Bash(rm -rf ~/.jessy)",
 
       "mcp__claude-in-chrome",

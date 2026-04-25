@@ -5,8 +5,17 @@ user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh*)
-  - Bash(test *)
+  - Bash(mktemp*)
+  - Bash(grep *)
+  - Bash(tail *)
+  - Bash(rm -f *)
+  - Bash(wc *)
+  - Bash(tr *)
+  - Bash(sed -n *)
   - Read
+  - Skill(jessy-learn)
+  - mcp__claude-in-chrome
+  - mcp__claude-in-chrome__*
 ---
 
 # jessy-report

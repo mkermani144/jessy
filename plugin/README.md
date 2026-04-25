@@ -45,12 +45,11 @@ the attached Chrome session.
 ### Permissions / approval prompts
 
 The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
-list covering every tool jessy actually invokes: the three bundled scripts
-(`db.sh`, `render_cards.sh`, `onboard.sh`), small bash helpers (`test`,
-`cat`, `mktemp`, `printf`), the Claude-in-Chrome MCP server
-(`mcp__claude-in-chrome*`), and `Read` / `Edit` / `Write` scoped to
-`~/.jessy/`. With this in place, a normal `/jessy:run` should not surface
-per-call approval prompts for plugin internals.
+list covering the plugin's helper scripts, the small Bash helpers used by
+scan/report flows, the Claude-in-Chrome MCP server, the nested
+`Skill(jessy-learn)` handoff from report, and `Read` / `Edit` / `Write`
+scoped to `~/.jessy/`. With this in place, a normal `/jessy:run` should
+not surface per-call approval prompts for plugin internals.
 
 These rules only auto-load when Claude Code reads a `.claude/settings.json`
 in scope. If you launch `claude` from a different working directory, copy
