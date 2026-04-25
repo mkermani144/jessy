@@ -7,7 +7,6 @@ allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh*)
   - Bash(test *)
   - Read
-  - AskUserQuestion
 ---
 
 # jessy-report
@@ -40,29 +39,52 @@ user_action, ts, company_name, company_size, company_summary`.
 
 If `JOBS` is empty, print `no unseen jobs — run /jessy:scan first` and stop.
 
-### 3. Render visual
+### 3. Render visual + capture index map
+
+Run render_cards.sh and capture stderr separately so the `INDEX_MAP` line
+does not pollute the rendered output:
 
 ```
+RENDER_ERR=$(mktemp)
 printf '%s\n' "$JOBS" | \
   ${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh \
-    --match "$threshold_match" --low "$threshold_low_show"
+    --match "$threshold_match" --low "$threshold_low_show" \
+    2> "$RENDER_ERR"
+INDEX_LINE=$(grep '^INDEX_MAP' "$RENDER_ERR" | tail -1)
+rm -f "$RENDER_ERR"
 ```
 
-Print the result as-is. Do not reformat.
+Print stdout as-is. Do not reformat.
 
-### 4. Build the multiselect
+Parse `INDEX_LINE` by splitting on tabs: drop the leading `INDEX_MAP`
+token; the remaining tokens are the candidate URLs in pick order (index
+1..N). This is the index→URL map. If it is empty, there are no
+pickable rows — skip step 4 and 5 (nothing to mark, nothing to open),
+go to step 6.
 
-From the same `JOBS`, take rows where `score >= threshold_low_show`
-(i.e. match + low buckets — ignored bucket is excluded from picks).
+### 4. Prompt for picks (numeric input)
 
-Construct one option per row:
-- `label`: `"{title} @ {company_name} (score {score})"` truncated to ~80 chars.
-- `value`: the canonical `url`.
+Print exactly one line below the rendered output:
 
-Use `AskUserQuestion` with `multiSelect: true`. Question:
-`Open in Chrome (multi-select; leave empty to dismiss all):`.
+```
+Open in Chrome — type indices (e.g. 1,3,5), 'all', or 'none':
+```
 
-If the candidate list is empty, skip the prompt.
+Then stop and wait for the user's next chat message. Do **not** use
+AskUserQuestion. The cards must remain visible in scrollback while the
+user types.
+
+Parse the user's reply (trim whitespace, lowercase for keyword check):
+
+- empty or `none` → picks = [].
+- `all` → picks = every URL in the index map.
+- otherwise → split on commas and whitespace; for each token, parse as
+  integer. Keep tokens that parse to an integer in `[1, N]`; dedupe
+  preserving first-seen order. If any token fails to parse or is out
+  of range, print one brief warning line listing the ignored tokens
+  (e.g. `ignored: foo, 99`) and continue with the valid picks.
+
+Map each pick index back to its URL via the index map.
 
 ### 5. Apply picks
 
@@ -72,16 +94,12 @@ For each picked URL:
   If chrome not attached, collect them and print at the end:
   `open these manually:` followed by the URLs.
 
-For each unpicked URL in the candidate list (match + low minus picks):
+For every URL in the candidate index map that was not picked:
 - `db.sh mark_action <url> dismissed`
 
-Ignored bucket (score < `threshold_low_show`) is left unmarked — they stay
-`user_action IS NULL` so a later report can revisit them if thresholds change.
-
-Wait — that contradicts the "fresh report = unseen" model. Decision for v1:
-**also mark ignored as dismissed** (so each report fully consumes its rows).
-Easier to reason about, matches user expectation that "report shown = report
-done". Track this as a future open question if thresholds become dynamic.
+For the ignored bucket (score < `threshold_low_show`, not in the index
+map): also mark each as `dismissed`. Rule: each report fully consumes
+its rows — "report shown = report done".
 
 ### 6. Check learn cadence
 
