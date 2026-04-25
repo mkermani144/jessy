@@ -41,6 +41,26 @@ alias claude-jessy='claude --plugin-dir /absolute/path/to/jessy/plugin --chrome'
 `--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab open uses
 the attached Chrome session.
 
+### Permissions / approval prompts
+
+The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
+list covering every tool jessy actually invokes: the three bundled scripts
+(`db.sh`, `render_cards.sh`, `onboard.sh`), small bash helpers (`test`,
+`cat`, `mktemp`, `printf`), the Claude-in-Chrome MCP server
+(`mcp__claude-in-chrome*`), and `Read` / `Edit` / `Write` scoped to
+`~/.jessy/`. With this in place, a normal `/jessy:run` should not surface
+per-call approval prompts for plugin internals.
+
+These rules only auto-load when Claude Code reads a `.claude/settings.json`
+in scope. If you launch `claude` from a different working directory, copy
+or merge the contents of `plugin/.claude/settings.json` into your
+`~/.claude/settings.json` (user-level) once. Note: Bash rules use wildcard
+prefix matching on the script paths (`Bash(*/scripts/db.sh*)`) so they work
+regardless of where the plugin is installed — `${CLAUDE_PLUGIN_ROOT}` does
+not expand inside permission rules. One-time user actions still required:
+allow the Claude-in-Chrome extension on first `/chrome` use, and attach
+the session with `claude --chrome`.
+
 ### Optional: bare `/jessy` slash command
 
 Claude Code namespaces plugin commands as `/<plugin>:<cmd>`, so the canonical

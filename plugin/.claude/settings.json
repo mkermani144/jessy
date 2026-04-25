@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*/scripts/db.sh*)",
+      "Bash(*/scripts/render_cards.sh*)",
+      "Bash(*/scripts/onboard.sh*)",
+
+      "Bash(test *)",
+      "Bash(cat *)",
+      "Bash(mktemp*)",
+      "Bash(printf *)",
+
+      "mcp__claude-in-chrome",
+      "mcp__claude-in-chrome__*",
+
+      "Read(~/.jessy/**)",
+      "Edit(~/.jessy/preferences.md)",
+      "Write(~/.jessy/preferences.md)"
+    ]
+  }
+}
