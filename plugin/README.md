@@ -16,6 +16,7 @@ See [`PLAN.md`](PLAN.md) for the v1 design.
 | `/jessy:cleanup` | Prune old / acted-on rows. Never touches unseen rows. |
 | `/jessy:config`  | Show path to `~/.jessy/config.yaml`; edit in your own editor. Onboards if missing. |
 | `/jessy:prefs`   | Show path to `~/.jessy/preferences.md`; edit in your own editor. Onboards if missing. |
+| `/jessy:reset`   | Wipe `~/.jessy` and re-onboard from scratch. Destructive — confirms first, no backup. |
 
 `/jessy:learn` also runs automatically from `/jessy:report` when the
 learning cadence is hit (configured in `config.yaml`).

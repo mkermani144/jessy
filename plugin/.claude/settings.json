@@ -9,6 +9,7 @@
       "Bash(cat *)",
       "Bash(mktemp*)",
       "Bash(printf *)",
+      "Bash(rm -rf ~/.jessy)",
 
       "mcp__claude-in-chrome",
       "mcp__claude-in-chrome__*",
