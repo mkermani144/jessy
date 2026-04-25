@@ -15,5 +15,5 @@ learning:
 
 linkedin:
   startup_urls: []            # filled during onboarding; add LinkedIn search URLs here
-  max_pages: 5
+  max_pages: 2                # tuned conservative for token cost
   skip_title_keywords: []     # optional title prefilter (cheap skip before open)

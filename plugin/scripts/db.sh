@@ -17,6 +17,7 @@ subcommands:
   meta_get <key>                    print meta value (empty if absent; exit 0)
   meta_set <key> <val>              upsert meta value
   seen <url>                        print "yes" or "no" (exit 0 in both cases)
+  company_exists <name>             print "yes" or "no" (exit 0 in both cases)
   upsert_company <name> [size] [summary]
                                     insert or update company; print id
   insert_job <url> <company_id> <title> <desc> <req_hard> <req_nice> \
@@ -93,6 +94,21 @@ cmd_seen() {
   local out
   out=$(sqlite3 -bail -batch "$JESSY_DB" \
     "SELECT 1 FROM jobs WHERE url = $(sql_quote "$url") LIMIT 1;")
+  if [[ "$out" == "1" ]]; then
+    echo yes
+  else
+    echo no
+  fi
+}
+
+# Print "yes"/"no" if a company row with this name exists.
+cmd_company_exists() {
+  require_sqlite
+  local name="${1:-}"
+  [[ -n "$name" ]] || { echo "db.sh: company_exists requires <name>" >&2; exit 2; }
+  local out
+  out=$(sqlite3 -bail -batch "$JESSY_DB" \
+    "SELECT 1 FROM companies WHERE name = $(sql_quote "$name") LIMIT 1;")
   if [[ "$out" == "1" ]]; then
     echo yes
   else
@@ -310,6 +326,7 @@ main() {
     meta_get)        cmd_meta_get "$@" ;;
     meta_set)        cmd_meta_set "$@" ;;
     seen)            cmd_seen "$@" ;;
+    company_exists)  cmd_company_exists "$@" ;;
     upsert_company)  cmd_upsert_company "$@" ;;
     insert_job)      cmd_insert_job "$@" ;;
     count)           cmd_count "$@" ;;
