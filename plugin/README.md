@@ -2,6 +2,8 @@
 
 Claude Code plugin replacing Rust `jessy`. Drives Chrome via `claude --chrome`,
 scans LinkedIn job tabs, scores against user prefs, renders ranked report.
+Scan flow is two-stage to cut token burn: cheap card triage first, deep detail
+read only for likely / ambiguous jobs.
 
 See [`PLAN.md`](PLAN.md) for the v1 design.
 

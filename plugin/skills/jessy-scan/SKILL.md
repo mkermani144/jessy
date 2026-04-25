@@ -16,15 +16,15 @@ allowed-tools:
 # jessy-scan
 
 Orchestrates a scan pass: enumerate LinkedIn tabs → for each search,
-walk pages → for each visible card, run cheap prefilters → **dispatch a
-Task subagent per surviving card** to open, extract, score → main thread
-receives one JSON line per card and writes the DB rows. Bumps learning
-counter. Prints summary.
+walk pages → for each visible card, run cheap prefilters → **stage 1
+card triage** (`skip` / `maybe` / `likely`) → **stage 2 detail
+extraction** (`lean` for `maybe`, `full` for `likely`) → optional
+`deepen` retry for lean ambiguous cards → main thread writes DB rows.
+Bumps learning counter. Prints summary.
 
-Why subagents: per-card DOM (description, requirements, company page)
-is the bulk of token cost. Isolating it in a subagent keeps the main
-context lean (URLs + counts + DB writes only) and lets independent
-cards parallelize via multiple Task calls in one message.
+Why two-stage: per-card DOM and company-page fetch are the bulk of token
+cost. Spend almost nothing on obvious losers, spend a little on maybes,
+spend full tokens only on promising cards.
 
 Runs against a live Chrome session via `claude --chrome`. Page semantics
 in `skills/platforms/linkedin/SKILL.md` (auto-loads on linkedin URLs).
@@ -41,13 +41,15 @@ Per-card subagent prompt template: `card-task.md` in this skill dir.
 
 Read once at start:
 
-- `~/.jessy/config.yaml` → `linkedin.max_pages`, `linkedin.skip_title_keywords`,
+- `~/.jessy/config.yaml` → `threshold_match`, `threshold_low_show`,
+  `linkedin.max_pages`, `linkedin.skip_title_keywords`,
   `linkedin.startup_urls`, `cleanup.prompt_when_over`.
 - `~/.jessy/preferences.md` → Dealbreakers / Dislikes / Likes / Notes sections.
   Hold the **full text** in a variable (`prefs_text`) — you will pass it
-  verbatim to each subagent. Also extract the bullets under
-  `## Dealbreakers` into a list (`dealbreakers`) for the title-only
-  prefilter below.
+  to stage-2 subagents. Also extract bullets under:
+  - `## Dealbreakers` → `dealbreakers`
+  - `## Dislikes` → `dislikes`
+  - `## Likes` → `likes`
 
 ## Procedure
 
@@ -72,7 +74,8 @@ b. Read the visible job cards: title, canonical URL (`/jobs/view/<id>`).
 c. **Same-list stop** — first 3 URLs equal `prev_first_urls` ⇒ stop walking
    this tab (pager did not advance).
 d. Update `prev_first_urls` = first 3 URLs.
-e. **Cheap prefilter pass** (no detail click, no subagent). For each
+e. **Cheap prefilter + stage-1 triage** (no detail click, no subagent).
+   For each
    visible card, in order:
    - Canonicalize the URL to `https://www.linkedin.com/jobs/view/<id>`
      (strip query params; keep only the id).
@@ -90,33 +93,68 @@ e. **Cheap prefilter pass** (no detail click, no subagent). For each
        linkedin 0 "dealbreaker (title): <bullet>"
      ```
      Tally as `ignored`. Move on.
-   - Otherwise add the card to `dispatch_list` (keep `canonical_url`,
-     `card_title`, `card_company_name`).
-f. **Dispatch subagents** for `dispatch_list`. For each card, build a
-   Task call using the prompt template in `card-task.md`. To parallelize,
-   issue **multiple Task calls in a single message** (small batches,
-   e.g. 3-5 at a time, to stay polite to LinkedIn). For each card pass:
+   - Capture any cheap card metadata visible without opening detail:
+     `card_company_name`, `card_location`, visible badges/tags, and a
+     short snippet/preview if LinkedIn shows one on the card.
+   - **Stage 1 route** using card-only evidence:
+     - `skip`: only for strong negatives visible already on the card.
+       Use sparingly. Good examples: explicit on-site location conflict,
+       explicit seniority/domain/company-name dislike, or multiple clear
+       negatives with no visible like. On `skip`, insert a partial row
+       directly:
+       ```
+       cid=$(db.sh upsert_company "<card_company_name>" "" "")
+       db.sh insert_job <canonical_url> "$cid" "<card_title>" "<card_snippet_or_empty>" \
+         '[]' '[]' linkedin <score_below_threshold_low_show> "stage1 skip: <reason>"
+       ```
+       Choose an integer score strictly below `threshold_low_show`
+       (typically `threshold_low_show - 1`, clamped at 0). Tally as
+       `ignored`. Move on.
+     - `likely`: at least one clear positive card signal and no strong
+       negative. Examples: title/stack/location/company clearly align.
+     - `maybe`: mixed, weak, or insufficient evidence. On uncertainty,
+       prefer `maybe`, not `skip`.
+   - Add `likely` cards to `likely_list`. Add `maybe` cards to
+     `maybe_list`. Keep `canonical_url`, `card_title`,
+     `card_company_name`, cheap card metadata, and a short
+     `route_reason`.
+f. **Dispatch stage-2 subagents**.
+   - `likely_list` → call `card-task.md` with `scan_mode=full`
+   - `maybe_list` → call `card-task.md` with `scan_mode=lean`
+   To parallelize, issue multiple Task calls in a single message
+   (small batches, e.g. 3-5 at a time, to stay polite to LinkedIn).
+   For each card pass:
    - `canonical_url`
    - `card_title`
+   - `card_company_name`
+   - `card_location`
+   - `card_badges`
+   - `card_snippet`
+   - `route_reason`
+   - `scan_mode` = `lean` or `full`
    - `prefs_text` (full prefs)
    - `company_already_known` = result of
      `db.sh company_exists "<card_company_name>"` (`yes` → `true`)
    - `scoring_rubric` = the rubric block below
    The subagent returns one JSON line. See `card-task.md` for the exact
-   shape; it matches `db.sh` args.
+   shapes.
 g. **Apply each subagent result** in the main thread:
    - On `error: login_wall` ⇒ stop scanning this tab; surface to user;
      continue other tabs.
    - On `error: detail_load_failed` ⇒ skip (no DB row, do not mark seen).
+   - On `decision: deepen` ⇒ immediately re-dispatch that same card once
+     with `scan_mode=full`. Do not write a DB row yet. Use the same
+     `canonical_url`, card metadata, prefs, and route reason.
    - Otherwise:
      ```
      cid=$(db.sh upsert_company "<company_name>" "<company_size>" "<company_summary>")
      db.sh insert_job <url> "$cid" "<title>" "<desc>" \
        '<req_hard_json>' '<req_nice_json>' linkedin <score> "<rationale>"
      ```
-     If `company_already_known` was true (size/summary will be empty),
+     If `company_already_known` was true (size/summary may be empty),
      `upsert_company` is still called (it preserves existing values via
-     `COALESCE NULLIF`), but the company page was not re-fetched.
+     `COALESCE NULLIF`). Lean-mode final rows typically leave
+     `company_size` / `company_summary` empty.
    - Tally counts: `new` (inserted), `match` (score ≥ `threshold_match`),
      `low` (score in `[threshold_low_show, threshold_match)`),
      `ignored` (score < `threshold_low_show`).
@@ -142,16 +180,28 @@ Inputs the subagent receives:
 
 - `canonical_url` — `https://www.linkedin.com/jobs/view/<id>`
 - `card_title` — title from the search list (informational)
+- `card_company_name`, `card_location`, `card_badges`, `card_snippet`
+  — cheap card metadata already visible on the search list
+- `route_reason` — one short line explaining why stage 1 chose this path
+- `scan_mode` — `lean` or `full`
 - `prefs_text` — full preferences.md text (Dealbreakers / Dislikes /
   Likes / Notes)
 - `company_already_known` — `true` or `false` (skip company page fetch
   when `true`)
 - `scoring_rubric` — the rubric block below
 
-The subagent must return **exactly one JSON line**, no prose, matching:
+The subagent must return **exactly one JSON line**, no prose.
+
+Final row shape:
 
 ```
 {"url":"<canonical_url>","title":"<str>","company_name":"<str>","company_size":"<str>","company_summary":"<str>","desc":"<str>","req_hard":["..."],"req_nice":["..."],"score":<int 0-100>,"rationale":"<str>"}
+```
+
+Lean-mode deepen sentinel:
+
+```
+{"url":"<canonical_url>","decision":"deepen"}
 ```
 
 These keys map 1:1 to `db.sh upsert_company` (`company_name`,
