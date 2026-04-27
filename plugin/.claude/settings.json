@@ -15,6 +15,10 @@
       "Bash(tr *)",
       "Bash(sed -n *)",
       "Bash(rm -f *)",
+      "Skill(jessy-onboard)",
+      "Skill(jessy-scan)",
+      "Skill(jessy-report)",
+      "Skill(jessy-cleanup)",
       "Skill(jessy-learn)",
       "Bash(rm -rf ~/.jessy)",
 

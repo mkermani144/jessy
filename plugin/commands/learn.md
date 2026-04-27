@@ -1,6 +1,9 @@
 ---
 description: Mine recent open/dismiss decisions, surface lopsided patterns, and update ~/.jessy/preferences.md with consent.
 disable-model-invocation: true
+allowed-tools:
+  - Skill(jessy-onboard)
+  - Skill(jessy-learn)
 ---
 
 1. If `~/.jessy/config.yaml` or `~/.jessy/preferences.md` is missing,

@@ -1,6 +1,9 @@
 ---
 description: Scan open LinkedIn job tabs in Chrome, score each against ~/.jessy/preferences.md, and persist new jobs. Requires `claude --chrome`.
 disable-model-invocation: true
+allowed-tools:
+  - Skill(jessy-onboard)
+  - Skill(jessy-scan)
 ---
 
 Run a jessy scan pass.

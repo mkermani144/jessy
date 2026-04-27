@@ -24,6 +24,15 @@ This plan only tracks confirmed work.
 Outcome: plugin-internal Bash should not require repeated approval during normal
 scan/report/learn/cleanup flows.
 
+Done:
+
+- Top-level command frontmatter now allows the internal skills it invokes.
+- Plugin settings now allow all internal jessy skills, not only `jessy-learn`.
+
+Remaining:
+
+- Script and Bash command permissions still need cleanup.
+
 Tasks:
 
 - Route internal work through plugin scripts instead of ad hoc shell fragments.

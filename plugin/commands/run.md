@@ -1,6 +1,10 @@
 ---
 description: Run a full jessy pass — scan open LinkedIn tabs, then render the report. Requires `claude --chrome`.
 disable-model-invocation: true
+allowed-tools:
+  - Skill(jessy-onboard)
+  - Skill(jessy-scan)
+  - Skill(jessy-report)
 ---
 
 Run jessy end-to-end.

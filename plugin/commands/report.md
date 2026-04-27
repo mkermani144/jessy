@@ -1,6 +1,9 @@
 ---
 description: Render the ranked report from ~/.jessy/jessy.db, prompt to open jobs in Chrome, mark picks/dismissals.
 disable-model-invocation: true
+allowed-tools:
+  - Skill(jessy-onboard)
+  - Skill(jessy-report)
 ---
 
 Run the jessy report flow.
