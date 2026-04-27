@@ -22,8 +22,9 @@ which to add to `preferences.md`. Then resets the learn counter.
 
 ```
 ROWS=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh recent_actions 50)
-PREFS=$(cat ~/.jessy/preferences.md)
 ```
+
+Read `~/.jessy/preferences.md` with Read.
 
 If `ROWS` is empty or fewer than ~10 acted-on rows total, print
 `not enough signal yet (need ~10 acted-on jobs); skipping`. Reset cadence
@@ -97,29 +98,23 @@ After all picks applied, print:
 
 ### 6. Reset cadence
 
-```
-db.sh meta_set jobs_since_last_learn 0
-idx=$(db.sh meta_get next_cadence_idx)
-cadence_len=$(db.sh config_cadence | wc -l | tr -d ' ')
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_set jobs_since_last_learn 0`.
+Then call `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get next_cadence_idx`
+and `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh config_cadence`. Count cadence
+lines yourself. If cadence is empty, leave the index untouched. Otherwise
+increment the index by one, clamped to the last cadence entry, and persist
+it with `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_set next_cadence_idx
+<new_idx>`.
 
-if [[ "$cadence_len" -eq 0 ]]; then
-  # No cadence configured; leave idx untouched.
-  :
-else
-  last=$(( cadence_len - 1 ))
-  new_idx=$(( idx + 1 > last ? last : idx + 1 ))
-  db.sh meta_set next_cadence_idx $new_idx
-fi
-```
-
-`db.sh config_cadence` parses the inline `cadence: [N, M, ...]` array from
-`~/.jessy/config.yaml` and emits one value per line. No `yq` dependency.
+`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh config_cadence` parses the inline
+`cadence: [N, M, ...]` array from `~/.jessy/config.yaml` and emits one
+value per line. No `yq` dependency.
 
 ### 7. Final output
 
 One line: `learn done — added N patterns; next check in M jobs`.
-`M = db.sh config_cadence | sed -n "$((new_idx + 1))p"`. If cadence is
-empty, print `learn done — added N patterns; no cadence configured`.
+`M` is the cadence line at `new_idx`. If cadence is empty, print
+`learn done — added N patterns; no cadence configured`.
 
 ## What this skill does NOT do
 

@@ -3,7 +3,7 @@ description: Wipe ~/.jessy (config, preferences, DB) and re-run first-run onboar
 disable-model-invocation: true
 allowed-tools:
   - Bash(rm -rf ~/.jessy)
-  - Bash(test *)
+  - Skill(jessy-onboard)
   - AskUserQuestion
 ---
 
@@ -24,7 +24,8 @@ Steps:
 
 ## Notes
 
-- Unlike `onboard.sh --force` (which backs up to `~/.jessy/backup-<ts>/`),
+- Unlike `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh --force` (which backs
+  up to `~/.jessy/backup-<ts>/`),
   this command takes no backup. Past state is unrecoverable.
 - Safe to run when `~/.jessy` already does not exist — `rm -rf` is a
   no-op, then onboarding runs normally.

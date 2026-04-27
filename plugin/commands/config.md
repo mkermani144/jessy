@@ -3,6 +3,7 @@ description: Show the path to ~/.jessy/config.yaml for the user to edit. Runs on
 disable-model-invocation: true
 allowed-tools:
   - Bash(test *)
+  - Skill(jessy-onboard)
   - Read
 ---
 

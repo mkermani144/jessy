@@ -5,8 +5,6 @@ user-invocable: false
 allowed-tools:
   - Bash(test *)
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh*)
-  - Bash(mktemp*)
-  - Bash(printf *)
   - Write
   - AskUserQuestion
 ---
@@ -40,17 +38,9 @@ Collect each answer as a multi-line string.
 
 ### 3. Write inputs to temp files
 
-For each answer, if non-empty, write it to a temp file (one value per
-line, leading/trailing whitespace trimmed, empty lines dropped):
-
-```
-URLS=$(mktemp)
-DB=$(mktemp)
-LK=$(mktemp)
-printf '%s\n' "<urls_answer>" > "$URLS"
-printf '%s\n' "<dealbreakers_answer>" > "$DB"
-printf '%s\n' "<likes_answer>" > "$LK"
-```
+For each non-empty answer, use Write to create a temporary input file
+under `/tmp` (one value per line, leading/trailing whitespace trimmed,
+empty lines dropped).
 
 If the answer was blank, pass `/dev/null` instead of a temp file path
 (script handles empty files fine).
@@ -60,14 +50,15 @@ If the answer was blank, pass `/dev/null` instead of a temp file path
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh \
   --non-interactive \
-  --urls-file "$URLS" \
-  --dealbreakers-file "$DB" \
-  --likes-file "$LK"
+  --urls-file "<urls_file_or_/dev/null>" \
+  --dealbreakers-file "<dealbreakers_file_or_/dev/null>" \
+  --likes-file "<likes_file_or_/dev/null>"
 ```
 
-onboard.sh is idempotent — re-runs when partially onboarded only write
-the missing files. `--force` is NOT used here; users who want to reset
-run `onboard.sh --force` manually.
+`${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh` is idempotent — re-runs when
+partially onboarded only write the missing files. `--force` is NOT used
+here; users who want to reset run
+`${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh --force` manually.
 
 ### 5. Report back
 
@@ -85,5 +76,6 @@ automatically — each caller decides).
 
 - Open an editor (Bash tool has no TTY).
 - Launch Chrome, scan, score, or query the DB.
-- Validate LinkedIn URLs beyond what `onboard.sh` does (HTTP + linkedin.com
+- Validate LinkedIn URLs beyond what
+  `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh` does (HTTP + linkedin.com
   domain). Invalid URLs are silently dropped with a log line.

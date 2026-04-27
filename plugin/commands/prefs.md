@@ -3,6 +3,7 @@ description: Show the path to ~/.jessy/preferences.md for the user to edit. Runs
 disable-model-invocation: true
 allowed-tools:
   - Bash(test *)
+  - Skill(jessy-onboard)
   - Read
 ---
 

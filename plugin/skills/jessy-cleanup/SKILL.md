@@ -9,8 +9,8 @@ allowed-tools:
 
 # jessy-cleanup
 
-Thin wrapper around `db.sh cleanup`. Reads `cleanup` section from
-`~/.jessy/config.yaml`:
+Thin wrapper around `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh cleanup`. Reads
+`cleanup` section from `~/.jessy/config.yaml`:
 
 - `cleanup.max_age_days`
 - `cleanup.max_rows`
@@ -25,7 +25,8 @@ Print the script's `pruned X; now Y rows` output as-is.
 
 ## Safety
 
-`db.sh cleanup` only deletes rows where `user_action IS NOT NULL`.
+`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh cleanup` only deletes rows where
+`user_action IS NOT NULL`.
 Rows the user has not yet seen (`user_action IS NULL`) are never
 touched, regardless of age or row count. No confirmation prompt
 needed — the operation is bounded by config and excludes unseen rows.

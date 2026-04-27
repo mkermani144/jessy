@@ -3,7 +3,7 @@
 Jessy is now a Claude Code skill/plugin repo. The old Rust implementation is
 archived under `jessy-old/`.
 
-This plan only tracks confirmed work.
+This plan only tracks confirmed work. All items below are complete.
 
 ## Goals
 
@@ -29,11 +29,7 @@ Done:
 - Top-level command frontmatter now allows the internal skills it invokes.
 - Plugin settings now allow all internal jessy skills, not only `jessy-learn`.
 
-Remaining:
-
-- Script and Bash command permissions still need cleanup.
-
-Tasks:
+Completed:
 
 - Route internal work through plugin scripts instead of ad hoc shell fragments.
 - Make `allowed-tools` match the commands skills actually run.
@@ -48,7 +44,7 @@ Tasks:
 Outcome: report applies user choices with one deterministic DB operation instead
 of many one-off `mark_action` calls.
 
-Tasks:
+Completed:
 
 - Add a batch DB command for report consumption.
 - Run one SQLite transaction.
@@ -61,7 +57,7 @@ Tasks:
 
 Outcome: report cards are useful without requiring hidden-output expansion.
 
-Tasks:
+Completed:
 
 - Prevent report output from becoming one huge collapsed Bash block.
 - Keep full cards visible for matches.
@@ -78,7 +74,7 @@ Tasks:
 Outcome: reduce wasted shell/DB work and make bottlenecks visible without adding
 token-heavy scan strategy changes.
 
-Tasks:
+Completed:
 
 - Batch DB calls where practical, especially seen checks and report-related
   state updates.
