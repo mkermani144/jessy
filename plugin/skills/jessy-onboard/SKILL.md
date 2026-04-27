@@ -75,6 +75,7 @@ Print:
 ```
 onboarded — config at ~/.jessy/config.yaml, prefs at ~/.jessy/preferences.md
 edit via /jessy:config or /jessy:prefs any time
+first scan/report may ask for Chrome extension access; allow it for the upcoming LinkedIn tab read/open actions
 ```
 
 Then return control to the caller (do not continue with a scan / report

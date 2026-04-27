@@ -41,8 +41,10 @@ Optional shell alias for repeated sessions:
 alias claude-jessy='claude --plugin-dir /absolute/path/to/jessy/plugin --chrome'
 ```
 
-`--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab open uses
-the attached Chrome session.
+`--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab read/open
+uses the attached Chrome session. On first use, allow the Claude-in-Chrome
+extension for the upcoming LinkedIn tab actions; normal runs assume that access
+is already granted.
 
 ### Permissions / approval prompts
 

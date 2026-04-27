@@ -36,6 +36,8 @@ Per-card subagent prompt template: `card-task.md` in this skill dir.
    `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh` first, then continue.
 2. Chrome session is attached (`claude --chrome`).
 3. User is signed into LinkedIn in that Chrome profile.
+4. On first Chrome-extension prompt, tell the user to allow access for the
+   upcoming LinkedIn tab reads. Do not ask again unless Chrome prompts again.
 
 ## Inputs
 

@@ -28,6 +28,8 @@ choices, opens picked URLs in Chrome.
 - `~/.jessy/jessy.db` exists with rows where `user_action IS NULL`.
 - For "Open in Chrome", a `claude --chrome` session is attached. If not,
   print picked URLs and tell the user to open them manually.
+- On first Chrome-extension prompt, tell the user to allow access for the
+  upcoming LinkedIn tab opens. Do not ask again unless Chrome prompts again.
 
 ## Procedure
 

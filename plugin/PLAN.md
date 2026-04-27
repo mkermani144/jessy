@@ -86,18 +86,6 @@ Deferred unless testing proves needed:
 - CDP/debug-profile browser path
 - computer-use browser path
 
-### 5. Chrome Extension Flow
-
-Outcome: keep the existing Chrome extension path simple.
-
-Tasks:
-
-- Keep using `claude --chrome` / Claude-in-Chrome for now.
-- Do not add a doctor/check command.
-- Do not switch to CDP or computer use.
-- During onboarding or first scan/report instruction, tell the user to allow the
-  Chrome extension for upcoming LinkedIn read/open actions.
-
 ## Done Criteria
 
 - Root remains skill/plugin-only.
@@ -105,4 +93,3 @@ Tasks:
 - Normal report flow uses batch DB consume.
 - Report content is visible without hidden expansion for normal-sized runs.
 - Scan output includes timing.
-- No unconfirmed browser strategy is implemented.
