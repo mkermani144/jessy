@@ -5,13 +5,6 @@ user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh*)
-  - Bash(mktemp*)
-  - Bash(grep *)
-  - Bash(tail *)
-  - Bash(rm -f *)
-  - Bash(wc *)
-  - Bash(tr *)
-  - Bash(sed -n *)
   - Read
   - Skill(jessy-learn)
   - mcp__claude-in-chrome
@@ -52,26 +45,17 @@ If `JOBS` is empty, print `no unseen jobs — run /jessy:scan first` and stop.
 
 ### 3. Render visual + capture index map
 
-Run render_cards.sh and capture stderr separately so the `INDEX_MAP` line
-does not pollute the rendered output:
-
-```
-RENDER_ERR=$(mktemp)
-printf '%s\n' "$JOBS" | \
-  ${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh \
-    --match "$threshold_match" --low "$threshold_low_show" \
-    2> "$RENDER_ERR"
-INDEX_LINE=$(grep '^INDEX_MAP' "$RENDER_ERR" | tail -1)
-rm -f "$RENDER_ERR"
-```
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh --match
+"$threshold_match" --low "$threshold_low_show"` with `JOBS` as stdin.
+Capture stderr separately so the `INDEX_MAP` line does not pollute the
+rendered output.
 
 Print stdout as-is. Do not reformat.
 
 Parse `INDEX_LINE` by splitting on tabs: drop the leading `INDEX_MAP`
 token; the remaining tokens are the candidate URLs in pick order (index
 1..N). This is the index→URL map. If it is empty, there are no
-pickable rows — skip step 4 and 5 (nothing to mark, nothing to open),
-go to step 6.
+pickable rows — skip step 4 and continue to step 5 with no picked URLs.
 
 ### 4. Prompt for picks (numeric input)
 
@@ -99,33 +83,32 @@ Map each pick index back to its URL via the index map.
 
 ### 5. Apply picks
 
-For each picked URL:
-- `db.sh mark_action <url> opened`
-- Open in Chrome via the `claude --chrome` session (new tab per URL).
+Open each picked URL in Chrome via the `claude --chrome` session (new tab
+per URL).
   If chrome not attached, collect them and print at the end:
   `open these manually:` followed by the URLs.
 
-For every URL in the candidate index map that was not picked:
-- `db.sh mark_action <url> dismissed`
+Then consume the exact report snapshot with one DB call:
+`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh consume_report <picked_url_args...>`,
+with `JOBS` as stdin. Capture its stdout as `CONSUME_SUMMARY`.
 
-For the ignored bucket (score < `threshold_low_show`, not in the index
-map): also mark each as `dismissed`. Rule: each report fully consumes
-its rows — "report shown = report done".
+Pass only picked URLs as args, preserving pick order. Pass no args for
+`none`. `consume_report` marks picked snapshot URLs as `opened` and every
+other URL from this snapshot as `dismissed`, including the ignored bucket
+(score < `threshold_low_show`, not in the index map). Rule: each report
+fully consumes its rows — "report shown = report done".
 
 ### 6. Check learn cadence
 
-```
-since=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get jobs_since_last_learn || echo 0)
-idx=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get next_cadence_idx || echo 0)
-cadence_len=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh config_cadence | wc -l | tr -d ' ')
-```
+Call `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get jobs_since_last_learn`,
+`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get next_cadence_idx`, and
+`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh config_cadence`. Treat empty meta
+values as `0`. Count cadence lines yourself.
 
 If `cadence_len == 0`, cadence is disabled; skip this step silently.
 
-Otherwise clamp `idx` to `[0, cadence_len - 1]` and fetch the target:
-```
-target=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh config_cadence | sed -n "$((idx + 1))p")
-```
+Otherwise clamp `idx` to `[0, cadence_len - 1]` and select the target
+from the cadence lines by zero-based index.
 
 If `since >= target`, print:
 ```
@@ -138,8 +121,7 @@ If the threshold is not hit, skip silently.
 
 ### 7. Final summary
 
-Print one line:
-`opened {N}; dismissed {M}; unseen {0}.`
+Print `CONSUME_SUMMARY`.
 
 ## What this skill does NOT do
 

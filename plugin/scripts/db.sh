@@ -28,6 +28,10 @@ subcommands:
   count                             print total jobs row count
   query_report [unseen|all]         emit JSONL, unseen = user_action IS NULL
                                     (default unseen), sorted by score DESC
+  consume_report [picked_url ...]   read query_report JSONL snapshot on stdin;
+                                    in one transaction, set picked URLs opened
+                                    and all other snapshot URLs dismissed;
+                                    prints "opened N; dismissed M; unseen 0."
   mark_action <url> <opened|dismissed>
                                     set jobs.user_action for url
   recent_actions [limit]            JSONL of jobs WHERE user_action IS NOT NULL
@@ -205,6 +209,59 @@ ORDER BY j.score DESC, j.ts DESC;
 SQL
 }
 
+cmd_consume_report() {
+  # Consume exactly the report snapshot passed on stdin. Picked URLs are args;
+  # every other URL from the snapshot is dismissed. This keeps report handling
+  # deterministic even if later scans add more unseen jobs.
+  require_sqlite
+
+  local sql line url
+  sql=$(
+    cat <<'SQL'
+BEGIN IMMEDIATE;
+CREATE TEMP TABLE report_lines(line TEXT NOT NULL);
+CREATE TEMP TABLE report_urls(url TEXT PRIMARY KEY NOT NULL);
+CREATE TEMP TABLE picked_urls(url TEXT PRIMARY KEY NOT NULL);
+SQL
+  )
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    sql+=$'\n'"INSERT INTO report_lines(line) VALUES($(sql_quote "$line"));"
+  done
+
+  for url in "$@"; do
+    [[ -n "$url" ]] || continue
+    sql+=$'\n'"INSERT OR IGNORE INTO picked_urls(url) VALUES($(sql_quote "$url"));"
+  done
+
+  sql+=$'\n'
+  sql+=$(cat <<'SQL'
+INSERT OR IGNORE INTO report_urls(url)
+SELECT json_extract(line, '$.url')
+FROM report_lines
+WHERE NULLIF(json_extract(line, '$.url'), '') IS NOT NULL;
+
+UPDATE jobs
+SET user_action = CASE
+  WHEN url IN (SELECT url FROM picked_urls) THEN 'opened'
+  ELSE 'dismissed'
+END
+WHERE url IN (SELECT url FROM report_urls);
+
+COMMIT;
+
+SELECT printf(
+  'opened %d; dismissed %d; unseen 0.',
+  (SELECT COUNT(*) FROM report_urls WHERE url IN (SELECT url FROM picked_urls)),
+  (SELECT COUNT(*) FROM report_urls WHERE url NOT IN (SELECT url FROM picked_urls))
+);
+SQL
+)
+
+  sqlite3 -bail -batch "$JESSY_DB" <<<"$sql"
+}
+
 cmd_recent_actions() {
   require_sqlite
   local limit="${1:-50}"
@@ -331,6 +388,7 @@ main() {
     insert_job)      cmd_insert_job "$@" ;;
     count)           cmd_count "$@" ;;
     query_report)    cmd_query_report "$@" ;;
+    consume_report)  cmd_consume_report "$@" ;;
     mark_action)     cmd_mark_action "$@" ;;
     recent_actions)  cmd_recent_actions "$@" ;;
     cleanup)         cmd_cleanup "$@" ;;
