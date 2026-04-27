@@ -38,6 +38,7 @@ You also have access to the `linkedin` skill (auto-loads on
      - up to ~3 strongest `req_hard`
      - up to ~2 strongest `req_nice`
    - Do **not** open the company page.
+   - Use card metadata already provided; do not re-query list/card DOM.
    - If the job already looks clearly low / not-match with confidence,
      score it now and return a **final row JSON**.
    - If the job looks promising or still ambiguous, return:
@@ -56,6 +57,7 @@ You also have access to the `linkedin` skill (auto-loads on
      - Read `company_size` and one-sentence `company_summary`.
      - Close that tab.
      Otherwise leave both as empty strings.
+   - Do not open extra pages beyond the one company page above.
    - Score per the rubric. Build one-line `rationale` (≤ ~100 chars).
    - Return a **final row JSON**.
 6. Return exactly one JSON line on stdout — no prose, no code fence.
@@ -87,4 +89,4 @@ Rules:
 - If the page redirects to a login wall, return:
   `{"url":"<canonical_url>","error":"login_wall"}`
 
-Do NOT call `db.sh` yourself — the main thread owns all DB writes.
+Do NOT call the DB script yourself — the main thread owns all DB writes.
