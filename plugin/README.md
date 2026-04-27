@@ -30,7 +30,10 @@ learning cadence is hit (configured in `config.yaml`).
 Pass the plugin directory to Claude Code at launch:
 
 ```sh
-claude --plugin-dir /absolute/path/to/jessy/plugin
+claude \
+  --settings /absolute/path/to/jessy/plugin/.claude/settings.json \
+  --plugin-dir /absolute/path/to/jessy/plugin \
+  --chrome
 ```
 
 In-session reload after editing plugin files: `/reload-plugins`.
@@ -38,7 +41,7 @@ In-session reload after editing plugin files: `/reload-plugins`.
 Optional shell alias for repeated sessions:
 
 ```sh
-alias claude-jessy='claude --plugin-dir /absolute/path/to/jessy/plugin --chrome'
+alias claude-jessy='claude --settings /absolute/path/to/jessy/plugin/.claude/settings.json --plugin-dir /absolute/path/to/jessy/plugin --chrome'
 ```
 
 `--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab read/open
@@ -49,21 +52,21 @@ is already granted.
 ### Permissions / approval prompts
 
 The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
-list covering the plugin's helper scripts, the small Bash helpers used by
-scan/report flows, the Claude-in-Chrome MCP server, the nested
-`Skill(jessy-learn)` handoff from report, and `Read` / `Edit` / `Write`
-scoped to `~/.jessy/`. With this in place, a normal `/jessy:run` should
-not surface per-call approval prompts for plugin internals.
+list covering helper scripts, small Bash helpers used by scan/report flows,
+Claude-in-Chrome MCP tools, the nested `Skill(jessy-learn)` handoff, and
+`Read` / `Edit` / `Write` scoped to `~/.jessy/`.
 
-These rules only auto-load when Claude Code reads a `.claude/settings.json`
-in scope. If you launch `claude` from a different working directory, copy
-or merge the contents of `plugin/.claude/settings.json` into your
-`~/.claude/settings.json` (user-level) once. Note: Bash rules use wildcard
-prefix matching on the script paths (`Bash(*/scripts/db.sh*)`) so they work
-regardless of where the plugin is installed — `${CLAUDE_PLUGIN_ROOT}` does
-not expand inside permission rules. One-time user actions still required:
-allow the Claude-in-Chrome extension on first `/chrome` use, and attach
-the session with `claude --chrome`.
+Important: `--plugin-dir` loads plugin commands/skills, but does **not** load
+`plugin/.claude/settings.json` as a settings source. Use `--settings
+/absolute/path/to/jessy/plugin/.claude/settings.json`, or merge that file into
+`~/.claude/settings.json` once. Without that, `db.sh` and other plugin helpers
+can still ask for approval.
+
+Bash rules use wildcard path matching (`Bash(*/scripts/db.sh*)`) so they work
+regardless of where the plugin is installed. `${CLAUDE_PLUGIN_ROOT}` is only
+for plugin skill/command content, not external settings files. One-time user
+actions still required: allow the Claude-in-Chrome extension on first `/chrome`
+use, and attach the session with `claude --chrome`.
 
 ### Optional: bare `/jessy` slash command
 

@@ -40,6 +40,10 @@ cat > "$DST" <<'EOF'
 ---
 description: Full jessy pass — scan open LinkedIn tabs, then render report. Requires the jessy plugin to be loaded.
 disable-model-invocation: true
+allowed-tools:
+  - Skill(jessy-onboard)
+  - Skill(jessy-scan)
+  - Skill(jessy-report)
 ---
 
 Run a full jessy pass:
@@ -50,7 +54,8 @@ Run a full jessy pass:
 3. Invoke the `jessy-report` skill against the rows just inserted.
 
 If the jessy plugin is not loaded, tell the user to relaunch with
-`claude --plugin-dir /path/to/jessy/plugin --chrome` and stop.
+`claude --settings /path/to/jessy/plugin/.claude/settings.json --plugin-dir /path/to/jessy/plugin --chrome`
+and stop.
 
 Stop after report finishes — do not re-scan.
 EOF
