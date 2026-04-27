@@ -50,6 +50,8 @@ printf '%s' "$INPUT" | jq -rs \
   --argjson low   "$LOW" \
   --argjson W     "$WIDTH" \
   --argjson S     "$START_INDEX" '
+  # Display-safe-ish string helpers. Inputs are plain text/URLs from job JSON.
+  def str: (. // "") | tostring;
   def trunc($n):
     if   $n <= 1       then "…"
     elif length > $n   then .[0:($n-1)] + "…"
@@ -60,11 +62,56 @@ printf '%s' "$INPUT" | jq -rs \
     else . + (" " * ($n - length))
     end;
 
-  ($W - 2) as $CW |
+  ($W - 4) as $IW |
 
-  def line($label; $val):
-    ($label + ": " + ($val // "")) as $body |
-    "│ " + ($body | trunc($CW - 2) | rpad($CW - 2)) + " │";
+  # Split long unbroken tokens, then greedily wrap by spaces.
+  def token_parts($w):
+    if ($w <= 1) then [trunc(1)]
+    elif length <= $w then [.]
+    else [range(0; length; ($w - 1)) as $i
+      | .[$i:($i + ($w - 1))]
+        + (if ($i + ($w - 1)) < length then "…" else "" end)]
+    end;
+
+  def wrap_words($w):
+    if ($w <= 1) then [trunc(1)]
+    else
+      (str | gsub("[[:space:]]+"; " ") | split(" ")
+        | map(select(. != ""))
+        | map(token_parts($w))
+        | add // []) as $tokens
+      | if ($tokens | length) == 0 then [""]
+        else reduce $tokens[] as $word ([];
+          if length == 0 then [$word]
+          else .[-1] as $last
+            | if (($last | length) + 1 + ($word | length)) <= $w
+              then .[0:length-1] + [$last + " " + $word]
+              else . + [$word]
+              end
+          end)
+        end
+    end;
+
+  def cap_lines($max; $w):
+    if length <= $max then .
+    elif $max <= 1 then [((.[0] // "") | trunc($w))]
+    else .[0:($max - 1)] + [((.[($max - 1):] | join(" ")) | trunc($w))]
+    end;
+
+  def boxed_line($body):
+    "│ " + ($body | trunc($IW) | rpad($IW)) + " │";
+
+  def row($label; $val; $max):
+    ($label + ": ") as $prefix |
+    (" " * ($prefix | length)) as $pad |
+    ($IW - ($prefix | length)) as $vw |
+    ($val | str | wrap_words($vw) | cap_lines($max; $vw)) as $lines |
+    [range(0; ($lines | length)) as $i
+      | if $i == 0
+        then boxed_line($prefix + $lines[$i])
+        else boxed_line($pad + $lines[$i])
+        end]
+    | join("\n");
 
   def header($idx; $score; $title):
     ("[\($idx)] [MATCH \($score)] \($title)") as $tag |
@@ -75,7 +122,7 @@ printf '%s' "$INPUT" | jq -rs \
      else
        ("╭─ [\($idx)] [MATCH \($score)] ") as $pre |
        ($W - ($pre | length) - 4) as $tn |
-       $pre + ($title | trunc($tn)) + " ─╮"
+       $pre + ($title | str | trunc($tn)) + " ─╮"
      end);
 
   def parse_arr($s):
@@ -91,17 +138,17 @@ printf '%s' "$INPUT" | jq -rs \
       | join(" — ")) as $comp |
     [
       header($idx; .score; .title),
-      line("Summary"; .desc),
-      line("Must";    $must),
-      line("Nice";    $nice),
-      line("Company"; $comp),
-      line("Why";     .rationale),
-      line("Link";    .url),
+      row("Summary"; .desc;      3),
+      row("Must";    $must;      3),
+      row("Nice";    $nice;      2),
+      row("Company"; $comp;      3),
+      row("Why";     .rationale; 3),
+      row("Link";    .url;       2),
       "╰" + ("─" * ($W - 2)) + "╯"
     ] | join("\n");
 
   def compact($idx):
-    "[\($idx)] • \(.title) @ \(.company_name) — score \(.score) — \(.rationale)  \(.url)"
+    "[\($idx)] low \(.score): \(.title | str) @ \(.company_name | str) — \(.rationale | str)"
     | trunc($W);
 
   . as $all
