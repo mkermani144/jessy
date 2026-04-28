@@ -114,7 +114,7 @@ While `pages_walked < linkedin.max_pages`, `stop_this_tab=false`, and
    - short visible snippet if present
 3. Same-list stop: if first 3 canonical URLs equal `prev_first_urls`, stop
    this tab. Otherwise set `prev_first_urls` to the current first 3.
-4. For each visible card, in order:
+4. For each visible card, in order while `stop_scan=false`:
    - Canonicalize to `https://www.linkedin.com/jobs/view/<id>`; strip query
      params and keep only the ID.
    - Attempt boundary: call
@@ -128,14 +128,18 @@ While `pages_walked < linkedin.max_pages`, `stop_this_tab=false`, and
      `new >= linkedin.max_new_per_run`, set `cap_hit=true`,
      `stop_scan=true`, and stop all remaining cards/tabs without writing an
      attempt for this card.
+     After any later increment of `new`, if
+     `new >= linkedin.max_new_per_run`, set `cap_hit=true` and
+     `stop_scan=true` after finishing the current card write.
    - Title skip keywords: if title matches any
      `linkedin.skip_title_keywords`, persist with:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job <url> <company> <title> <snippet> 0 "skip title: <keyword>"`
-     Count new and ignored, cache attempted `yes`, continue.
+     Count new and ignored, cache attempted `yes`, then honor `stop_scan` or
+     continue.
    - Title-only dealbreaker: if a dealbreaker bullet matches the title,
      persist with `db_scan.sh skip_job` and rationale
      `dealbreaker (title): <bullet>`. Count new and ignored, cache attempted
-     `yes`, continue.
+     `yes`, then honor `stop_scan` or continue.
    - Otherwise persist attempt start:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> linkedin`
      Count new and cache attempted `yes`.
