@@ -149,7 +149,8 @@ printf '%s' "$INPUT" | jq -rs \
 
   def compact($idx):
     "[\($idx)] low \(.score): \(.title | str) @ \(.company_name | str) — \(.rationale | str)"
-    | trunc($W);
+    | wrap_words($W)
+    | join("\n");
 
   . as $all
   | (map(select(.score >= $match)))              as $m

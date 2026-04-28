@@ -59,6 +59,23 @@ config_int() {
   fi
 }
 
+detect_width() {
+  # Match report width to the viewing terminal; keep fixtures readable.
+  local width=""
+  if [[ "${JESSY_REPORT_WIDTH:-}" =~ ^[0-9]+$ ]]; then
+    width="$JESSY_REPORT_WIDTH"
+  elif command -v tmux >/dev/null 2>&1; then
+    width="$(tmux display-message -p '#{window_width}' 2>/dev/null || true)"
+  fi
+  if [[ ! "$width" =~ ^[0-9]+$ ]] && command -v tput >/dev/null 2>&1; then
+    width="$(tput cols 2>/dev/null || true)"
+  fi
+  [[ "$width" =~ ^[0-9]+$ ]] || width=100
+  (( width < 56 )) && width=56
+  (( width > 140 )) && width=140
+  printf '%s\n' "$width"
+}
+
 write_index_tsv() {
   # Convert render_cards' INDEX_MAP stderr line to stable "index<TAB>url" TSV.
   local render_err="$1" index_file="$2" line i
@@ -88,9 +105,10 @@ open_report_if_possible() {
 }
 
 cmd_prepare() {
-  local match low session_dir snapshot cards index render_err state_tmp prompt
+  local match low width session_dir snapshot cards index render_err state_tmp prompt
   match="$(config_int threshold_match 70)"
   low="$(config_int threshold_low_show 30)"
+  width="$(detect_width)"
 
   session_dir="$(mktemp -d "${TMPDIR:-/tmp}/jessy-report.XXXXXX")"
   snapshot="$session_dir/report.jsonl"
@@ -99,7 +117,7 @@ cmd_prepare() {
   render_err="$session_dir/render.err"
 
   "$DB_SH" query_report > "$snapshot"
-  "$RENDER_SH" --match "$match" --low "$low" < "$snapshot" > "$cards" 2> "$render_err"
+  "$RENDER_SH" --match "$match" --low "$low" --width "$width" < "$snapshot" > "$cards" 2> "$render_err"
   write_index_tsv "$render_err" "$index"
   open_report_if_possible "$cards"
 

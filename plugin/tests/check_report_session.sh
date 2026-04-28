@@ -13,6 +13,7 @@ trap 'rm -f "$TMP_DB" "$TMP_STATE"' EXIT
 export JESSY_DB="$TMP_DB"
 export JESSY_REPORT_STATE="$TMP_STATE"
 export JESSY_REPORT_NO_TMUX=1
+export JESSY_REPORT_WIDTH=64
 
 setup_db() {
   rm -f "$TMP_DB"
@@ -59,6 +60,7 @@ grep -q 'Review report outside chat' <<< "$prepare_out"
 [[ -s "$snapshot" ]]
 [[ -s "$cards" ]]
 [[ -s "$index" ]]
+perl -Mutf8 -Mopen=:std,:encoding\(UTF-8\) -ne 'chomp; die qq(line $. too wide: $_\n) if length($_) > 64' "$cards"
 grep -q $'^1\thttps://jobs.example.com/match$' "$index"
 grep -q $'^2\thttps://jobs.example.com/low$' "$index"
 ! grep -q 'ignored' "$index"

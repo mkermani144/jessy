@@ -26,6 +26,7 @@ check_width() {
   grep -q 'postmortem' "$out"
   grep -q 'https://jobs.example.com/northstar' "$out"
   grep -q '^\[2\] low 52:' "$out"
+  grep -q 'stack differs' "$out"
   grep -q '^+1 more non-match jobs ignored$' "$out"
   grep -q $'^INDEX_MAP\thttps://jobs.example.com/northstar' "$err"
 
