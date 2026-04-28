@@ -60,7 +60,10 @@ grep -q 'Review report outside chat' <<< "$prepare_out"
 [[ -s "$snapshot" ]]
 [[ -s "$cards" ]]
 [[ -s "$index" ]]
-perl -Mutf8 -Mopen=:std,:encoding\(UTF-8\) -ne 'chomp; die qq(line $. too wide: $_\n) if length($_) > 64' "$cards"
+clean_cards="$(mktemp)"
+trap 'rm -f "$TMP_DB" "$TMP_STATE" "$clean_cards"' EXIT
+perl -pe 's/\e\[[0-9;]*m//g' "$cards" > "$clean_cards"
+perl -Mutf8 -Mopen=:std,:encoding\(UTF-8\) -ne 'chomp; die qq(line $. too wide: $_\n) if length($_) > 64' "$clean_cards"
 grep -q $'^1\thttps://jobs.example.com/match$' "$index"
 grep -q $'^2\thttps://jobs.example.com/low$' "$index"
 ! grep -q 'ignored' "$index"

@@ -113,6 +113,12 @@ printf '%s' "$INPUT" | jq -rs \
         end]
     | join("\n");
 
+  def alt_colors:
+    split("\n")
+    | [range(0; length) as $i
+      | "\u001b[38;5;\(if ($i % 2) == 0 then 255 else 250 end)m\(.[$i])\u001b[0m"]
+    | join("\n");
+
   def header($idx; $score; $title):
     ("[\($idx)] [MATCH \($score)] \($title)") as $tag |
     ("╭─ " + $tag + " ") as $hp |
@@ -185,6 +191,7 @@ printf '%s' "$INPUT" | jq -rs \
     ]
   | map(select(. != null and . != ""))
   | join("\n\n")
+  | alt_colors
 '
 
 # Emit INDEX_MAP on stderr: tab-separated URLs in pick order
