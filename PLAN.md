@@ -1,165 +1,166 @@
-# PLAN.md
+# Jessy Usage Reduction Plan
 
-# Jessy Scan Token Burn Fix
+## Context
+- Current high usage is not plugin prompt bloat.
+- `/context` showed small fixed context:
+  - skills: ~1.8k
+  - custom agents: ~85
+  - MCP tool definitions: ~1.6k
+- Main cost is message history and repeated work:
+  - Opus/xhigh main thread
+  - Chrome/browser reads
+  - per-job extractor subagent calls
+  - report JSON/cards printed into chat
 
 ## Goal
-- Cut Claude token/time burn during LinkedIn scans.
-- Preserve card-level context isolation.
-- Stop scanning once Jessy reaches already-attempted territory.
-- Keep normal scan simple, bounded by discovered novelty, not hard caps.
+- Cut Jessy scan/report limit usage.
+- Keep current scan architecture.
+- Keep extractor subagent.
+- Do not add split scan modes.
 
 ## Decisions
-- No global scan budgets for now.
-- No tab cap for now.
-- Stop following lower/older cards after first Jessy DB-attempted card in each LinkedIn tab/feed.
-- "Seen" means Jessy attempted/seen state, not LinkedIn `viewed`.
-- Keep subagents, but use them only as extractors.
-- Run extractor subagents serialized, one at a time.
-- Extractor gets URL/card only.
-- Extractor has no prefs, no rubric, no fit check.
-- Main agent owns all matching/ranking.
-- Remove lean/full/deepen flow.
-- Do not browse company pages during normal scan.
-- Do not open extra tabs during extraction.
+- Use cheaper main models for Jessy skills.
+- Keep extractor on Haiku low.
+- Cap scan novelty per run.
+- Render reports outside Claude chat.
+- Keep all large report artifacts in files/tmux.
+- Avoid full page/card text in parent context.
+- Prefer script/helper output over model output, but do not print bulky helper output into chat.
 
-## Flow
-1. Main scan walks each LinkedIn tab/feed top-down.
-2. For each card, derive stable job key/url.
-3. Check Jessy DB attempt state.
-4. If key/url was attempted before:
-   - stop lower/older cards for this tab/feed
-   - continue next tab/feed
-5. For unattempted cards above boundary:
-   - persist attempt start
-   - call one extractor subagent
-   - persist extraction result
-6. After extraction batch, main agent scores JSONs against prefs/context.
-7. Persist score/result.
+## 1. Skill Model Frontmatter
+Add model/effort to plugin skills.
 
-## Attempt Boundary
-- Any attempted card counts as a boundary:
-  - `ok`
-  - `partial`
-  - `failed`
-  - `scored`
-  - `accepted`
-  - `rejected`
-  - `deferred`
-- Failed cards still count as normal-scan boundary.
-- Failed-card recovery is a separate targeted flow later.
-- Normal scan should not dig below attempted territory.
+Targets:
 
-## Extractor Contract
-- Input:
-  - canonical job URL
-  - minimal card fields if already visible
-- Output:
-  - strict JSON only
-  - no markdown
-  - no prose outside JSON
-  - no fit judgment
-  - unknown allowed
-
-## Extractor Schema
-```json
-{
-  "status": "ok",
-  "url": "https://...",
-  "lang": "en",
-  "title": "Staff Backend Engineer",
-  "company": "Acme",
-  "company_size": "unknown",
-  "location": "remote US",
-  "seniority": "staff",
-  "employment": "full_time",
-  "salary": "unknown",
-  "visa": "unknown",
-  "req": [
-    "8 years backend",
-    "rust",
-    "distributed systems"
-  ],
-  "nice": [
-    "kubernetes"
-  ],
-  "summary": [
-    "Build backend services",
-    "Own production systems"
-  ],
-  "evidence": [
-    "Remote - United States",
-    "8+ years backend engineering"
-  ]
-}
+```yaml
+# plugin/skills/jessy-scan/SKILL.md
+model: sonnet
+effort: low
 ```
 
-## Extractor Field Notes
-- `status`: extraction health, not job fit.
-  - `ok`: useful detail loaded
-  - `partial`: some useful detail loaded, key fields missing
-  - `failed`: no useful detail
-- `location`: include work mode and geography in one field.
-  - examples: `remote US`, `on-site Armenia`, `hybrid NYC`, `remote China`
-- `req`: requirements and tech together.
-- `domain`: omitted. Main agent infers from other fields.
-- `bad`: omitted. Depends on prefs, which extractor does not know.
-- `lang`: posting language, short code if obvious, else `unknown`.
-- `evidence`: short raw snippets for audit. Optional if unavailable.
+```yaml
+# plugin/skills/jessy-report/SKILL.md
+model: haiku
+effort: low
+```
 
-## Caps
-- `req`: max 10
-- `nice`: max 5
-- `summary`: max 4
-- `evidence`: max 4
-- Each string: max 120 chars
-- No full job description
-- No repeated boilerplate
+```yaml
+# plugin/skills/jessy-learn/SKILL.md
+model: sonnet
+effort: medium
+```
 
-## Enums
-- `status`: `ok|partial|failed`
-- `seniority`: `intern|junior|mid|senior|staff|principal|exec|unknown`
-- `employment`: `full_time|contract|part_time|internship|unknown`
+Keep:
 
-## Failure Policy
-- Try once more only for mechanical load issues:
-  - `timeout`
-  - `load_failed`
-  - `detail_not_loaded`
-- Do not retry during normal scan for:
-  - `auth_wall`
-  - `removed`
-  - `invalid_url`
-  - `not_job`
-- Persist final attempt either way.
-- Failed attempts count as scan boundary.
+```yaml
+# plugin/agents/jessy-linkedin-extractor.md
+model: haiku
+effort: low
+```
 
-## Main Scoring
-- Main agent has prefs/context once.
-- Main agent scores extracted JSONs.
-- Main agent may infer:
-  - domain
-  - likely role shape
-  - fit/misfit
-  - uncertainty
-- Main decisions:
-  - `accept`
-  - `maybe`
-  - `reject`
-  - `defer`
+Reason:
+- User default may be Opus/xhigh.
+- Scan/report are tool discipline + simple scoring, not frontier reasoning.
+- Learn can use Sonnet because it interprets preference patterns.
 
-## Remove / Disable
-- Per-card judge subagents.
-- Parallel stage2 batches.
-- Lean/full/deepen modes.
-- Per-card prefs/rubric prompt injection.
-- Company-page lookup in normal scan.
+## 2. Scan Cap
+Add config:
+
+```yaml
+linkedin:
+  max_new_per_run: 20
+```
+
+Behavior:
+- Count every newly attempted unattempted card.
+- Includes skipped, failed, partial, scored.
+- Stop scan when cap reached.
+- Print cap in summary when hit:
+  - `scanned N new; M match; K low; L ignored; cap hit`
+
+Reason:
+- Prevent runaway first scans.
+- Bound subagent count and Chrome reads.
+
+## 3. Report Outside Chat
+Current report risk:
+- `db.sh query_report` emits JSONL for unseen jobs.
+- `render_cards.sh` renders cards.
+- If stdout/stderr returns to Claude, all of it enters context.
+
+New report flow:
+1. Query report to temp JSONL file.
+2. Render cards to temp text file.
+3. Write index map to temp TSV/file.
+4. Open report in tmux:
+
+```sh
+tmux new-window -n jessy-report 'less -R /tmp/jessy-report.txt'
+```
+
+5. User replies with indices in chat.
+6. Helper consumes picks by reading index file, not by sending URL map through Claude.
+
+Needed helper:
+- `plugin/scripts/report_session.sh`
+- subcommands:
+  - `prepare`
+  - `consume <indices|all|none>`
+
+Output to Claude:
+- temp paths
+- one-line prompt
+- final consume summary
+
+Do not print:
+- full JSONL
+- rendered cards
+- full index map
+
+Reason:
+- Script-generated cards still count if printed into transcript.
+- tmux/less lets user see cards without loading them into model context.
+
+## 4. Compact Scan Parent Context
+Keep parent thread compact:
+- Extractor final answer strict compact JSON only.
+- No full job descriptions in extractor output.
+- No verbose per-card assistant narration.
+- Batch visible-card attempt checks with `attempted_many`.
+- Use DB helpers whose stdout is one-line or empty.
+
+Scan DB outputs are already mostly small:
+- `attempted`: `yes|no`
+- `attempt_start`: `inserted|skipped`
+- `score_job`: `inserted|skipped`
+- `count`: integer
+
+Large DB outputs to avoid in chat:
+- `query_report`
+- `recent_actions`
+
+## 5. Stronger Cheap Prefilter
+Before spawning extractor:
+- Apply title skip keywords.
+- Apply title-only dealbreakers.
+- Add optional company/location/snippet skip rules if useful.
+
+Reason:
+- Every avoided extractor saves one Haiku request plus Chrome job-detail reads.
+
+## Implementation Order
+1. Add skill model/effort frontmatter.
+2. Add report temp-file/tmux flow.
+3. Add `linkedin.max_new_per_run`.
+4. Tighten scan transcript discipline.
+5. Add more prefilter fields only if still needed.
 
 ## Acceptance Checks
-- Five LinkedIn tabs do not trigger parallel browser subagents.
-- Extractor subagents run one at a time.
-- Extractor prompt does not include prefs or scoring rubric.
-- First DB-attempted card stops lower/older scanning for that tab/feed.
-- LinkedIn `viewed` label is ignored for boundary logic.
-- Failed extraction is persisted and counts as attempted.
-- Main scoring works from extractor JSON only.
-- No normal-scan company-page browsing.
+- `/jessy:scan` runs on Sonnet low unless user overrides.
+- `/jessy:report` runs on Haiku low or Sonnet low.
+- Extractor remains Haiku low.
+- Report cards appear in tmux/less, not chat.
+- Claude chat receives no full report JSONL/card output.
+- Scan stops at `linkedin.max_new_per_run`.
+- Existing attempted-boundary behavior remains.
+- No split scan modes added.
