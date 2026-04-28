@@ -1,106 +1,71 @@
 ---
 name: jessy-report
-description: Render the ranked jessy job report from ~/.jessy/jessy.db, prompt the user to pick which jobs to open in Chrome, mark picks opened and the rest dismissed, and check the learning cadence. Use when the user runs /jessy:report or /jessy.
+description: Prepare the ranked jessy job report outside chat, prompt for picks, mark picked jobs opened and the rest dismissed, and check the learning cadence. Use when the user runs /jessy:report or /jessy.
 model: haiku
 effort: low
 user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)
-  - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh*)
+  - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/report_session.sh*)
   - Read
   - Skill(jessy-learn)
-  - mcp__claude-in-chrome
-  - mcp__claude-in-chrome__*
 ---
 
 # jessy-report
 
-Renders the report, captures the user's open/dismiss picks, persists the
-choices, opens picked URLs in Chrome.
+Prepares report artifacts outside chat, captures the user's pick reply, and
+persists opened/dismissed choices.
 
 ## Preconditions
 
-- `~/.jessy/jessy.db` exists with rows where `user_action IS NULL`.
-- For "Open in Chrome", a `claude --chrome` session is attached. If not,
-  print picked URLs and tell the user to open them manually.
-- On first Chrome-extension prompt, tell the user to allow access for the
-  upcoming LinkedIn tab opens. Do not ask again unless Chrome prompts again.
+- `~/.jessy/jessy.db` exists.
+- `tmux` + `less` are optional. If available in the current session,
+  `report_session.sh prepare` opens the rendered report in a tmux window.
 
 ## Procedure
 
-### 1. Read config
+### 1. Prepare outside-chat report
 
-`~/.jessy/config.yaml` → `threshold_match`, `threshold_low_show`,
-`learning.cadence`.
-
-### 2. Pull report rows
+Run:
 
 ```
-JOBS=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh query_report)
+${CLAUDE_PLUGIN_ROOT}/scripts/report_session.sh prepare
 ```
 
-`JOBS` is JSONL, one job per line, sorted by score DESC. Each line has:
-`url, title, desc, req_hard, req_nice, platform, score, rationale,
-user_action, ts, company_name, company_size, company_summary`.
+Print its stdout as-is. It contains only temp paths plus one prompt.
+It must not print report JSONL, rendered cards, or the full index map
+into chat.
 
-If `JOBS` is empty, print `no unseen jobs — run /jessy:scan first` and stop.
+If the prompt says `No unseen jobs; run /jessy:scan first.`, stop.
 
-### 3. Render visual + capture index map
+### 2. Wait for picks
 
-Run `${CLAUDE_PLUGIN_ROOT}/scripts/render_cards.sh --match
-"$threshold_match" --low "$threshold_low_show"` with `JOBS` as stdin.
-Capture stderr separately so the `INDEX_MAP` line does not pollute the
-rendered output.
+Stop and wait for the user's next chat message. Do **not** use
+AskUserQuestion.
 
-Print stdout as-is. Do not reformat.
+Accepted replies:
 
-Parse `INDEX_LINE` by splitting on tabs: drop the leading `INDEX_MAP`
-token; the remaining tokens are the candidate URLs in pick order (index
-1..N). This is the index→URL map. If it is empty, there are no
-pickable rows — skip step 4 and continue to step 5 with no picked URLs.
+- empty or `none`
+- `all`
+- comma/space-separated indices, e.g. `1,3,5`
 
-### 4. Prompt for picks (numeric input)
+### 3. Consume prepared snapshot
 
-Print exactly one line below the rendered output:
+Run:
 
 ```
-Open in Chrome — type indices (e.g. 1,3,5), 'all', or 'none':
+${CLAUDE_PLUGIN_ROOT}/scripts/report_session.sh consume "<user reply>"
 ```
 
-Then stop and wait for the user's next chat message. Do **not** use
-AskUserQuestion. The cards must remain visible in scrollback while the
-user types.
+Print its stdout as-is. It is the final consume summary only:
+`opened N; dismissed M; unseen 0.`
 
-Parse the user's reply (trim whitespace, lowercase for keyword check):
+The helper reads the prepared temp JSONL snapshot and index TSV. It maps
+indices to URLs internally, calls `db.sh consume_report`, marks picked
+snapshot URLs `opened`, and marks every other snapshot URL `dismissed`,
+including ignored rows not present in the pickable index.
 
-- empty or `none` → picks = [].
-- `all` → picks = every URL in the index map.
-- otherwise → split on commas and whitespace; for each token, parse as
-  integer. Keep tokens that parse to an integer in `[1, N]`; dedupe
-  preserving first-seen order. If any token fails to parse or is out
-  of range, print one brief warning line listing the ignored tokens
-  (e.g. `ignored: foo, 99`) and continue with the valid picks.
-
-Map each pick index back to its URL via the index map.
-
-### 5. Apply picks
-
-Open each picked URL in Chrome via the `claude --chrome` session (new tab
-per URL).
-  If chrome not attached, collect them and print at the end:
-  `open these manually:` followed by the URLs.
-
-Then consume the exact report snapshot with one DB call:
-`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh consume_report <picked_url_args...>`,
-with `JOBS` as stdin. Capture its stdout as `CONSUME_SUMMARY`.
-
-Pass only picked URLs as args, preserving pick order. Pass no args for
-`none`. `consume_report` marks picked snapshot URLs as `opened` and every
-other URL from this snapshot as `dismissed`, including the ignored bucket
-(score < `threshold_low_show`, not in the index map). Rule: each report
-fully consumes its rows — "report shown = report done".
-
-### 6. Check learn cadence
+### 4. Check learn cadence
 
 Call `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get jobs_since_last_learn`,
 `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get next_cadence_idx`, and
@@ -117,17 +82,13 @@ If `since >= target`, print:
 ↳ learn threshold hit (since={since}, target={target}). Running jessy-learn…
 ```
 Then invoke the **jessy-learn** skill in this same turn. Its output prints
-inline. Continue with step 7 after it returns.
+inline.
 
 If the threshold is not hit, skip silently.
-
-### 7. Final summary
-
-Print `CONSUME_SUMMARY`.
 
 ## What this skill does NOT do
 
 - Re-score jobs. Scoring happened during scan.
 - Modify `companies` rows.
-- Open tabs without explicit user pick.
+- Print report JSONL/cards/index map into chat.
 - Auto-apply.

@@ -4,6 +4,7 @@
       "Bash(*/scripts/db.sh*)",
       "Bash(*/scripts/db_scan.sh*)",
       "Bash(*/scripts/render_cards.sh*)",
+      "Bash(*/scripts/report_session.sh*)",
       "Bash(*/scripts/onboard.sh*)",
 
       "Bash(test *)",
@@ -15,6 +16,8 @@
       "Bash(wc *)",
       "Bash(tr *)",
       "Bash(sed -n *)",
+      "Bash(tmux *)",
+      "Bash(less *)",
       "Bash(rm -f *)",
       "Skill(jessy-onboard)",
       "Skill(jessy-scan)",
