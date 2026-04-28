@@ -16,8 +16,6 @@
       "Bash(wc *)",
       "Bash(tr *)",
       "Bash(sed -n *)",
-      "Bash(tmux *)",
-      "Bash(less *)",
       "Bash(rm -f *)",
       "Skill(jessy-onboard)",
       "Skill(jessy-scan)",

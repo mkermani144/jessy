@@ -13,5 +13,6 @@ Run a jessy scan pass.
 2. Invoke the **jessy-scan** skill end-to-end. Use the linkedin platform
    skill for page semantics.
 3. When done, print the one-line summary
-   (`scanned N new; M match; K low; L ignored`) and stop — do not also
-   render the report. The user runs `/jessy:report` separately.
+   (`scanned N new; M match; K low; L ignored`, optionally `; cap hit`)
+   and stop — do not also render the report. The user runs
+   `/jessy:report` separately.

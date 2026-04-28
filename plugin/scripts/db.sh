@@ -21,7 +21,6 @@ subcommands:
   attempt_finish <url> <status> [extraction_json] [score] [rationale]
                                     persist extraction/scoring outcome
   seen <url>                        alias for attempted (backcompat)
-  company_exists <name>             print "yes" or "no" (exit 0 in both cases)
   upsert_company <name> [size] [summary]
                                     insert or update company; print id
   insert_job <url> <company_id> <title> <desc> <req_hard> <req_nice> \
@@ -36,8 +35,6 @@ subcommands:
                                     in one transaction, set picked URLs opened
                                     and all other snapshot URLs dismissed;
                                     prints "opened N; dismissed M; unseen 0."
-  mark_action <url> <opened|dismissed>
-                                    set jobs.user_action for url
   recent_actions [limit]            JSONL of jobs WHERE user_action IS NOT NULL
                                     ORDER BY ts DESC LIMIT N (default 50)
   cleanup <max_age_days> <max_rows> prune jobs older than N days with action set;
@@ -182,21 +179,6 @@ ON CONFLICT(url) DO UPDATE SET
   score = excluded.score,
   rationale = excluded.rationale;
 SQL
-}
-
-# Print "yes"/"no" if a company row with this name exists.
-cmd_company_exists() {
-  require_sqlite
-  local name="${1:-}"
-  [[ -n "$name" ]] || { echo "db.sh: company_exists requires <name>" >&2; exit 2; }
-  local out
-  out=$(sqlite3 -bail -batch "$JESSY_DB" \
-    "SELECT 1 FROM companies WHERE name = $(sql_quote "$name") LIMIT 1;")
-  if [[ "$out" == "1" ]]; then
-    echo yes
-  else
-    echo no
-  fi
 }
 
 cmd_upsert_company() {
@@ -447,22 +429,6 @@ cmd_config_cadence() {
   ' "$path"
 }
 
-cmd_mark_action() {
-  require_sqlite
-  local url="${1:-}" action="${2:-}"
-  [[ -n "$url" && -n "$action" ]] || {
-    echo "db.sh: mark_action requires <url> <opened|dismissed>" >&2
-    exit 2
-  }
-  case "$action" in
-    opened|dismissed) ;;
-    *) echo "db.sh: action must be opened or dismissed" >&2; exit 2 ;;
-  esac
-  sqlite3 -bail -batch "$JESSY_DB" \
-    "UPDATE jobs SET user_action = $(sql_quote "$action")
-     WHERE url = $(sql_quote "$url");"
-}
-
 main() {
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
@@ -480,13 +446,11 @@ main() {
     attempt_start)   cmd_attempt_start "$@" ;;
     attempt_finish)  cmd_attempt_finish "$@" ;;
     seen)            cmd_seen "$@" ;;
-    company_exists)  cmd_company_exists "$@" ;;
     upsert_company)  cmd_upsert_company "$@" ;;
     insert_job)      cmd_insert_job "$@" ;;
     count)           cmd_count "$@" ;;
     query_report)    cmd_query_report "$@" ;;
     consume_report)  cmd_consume_report "$@" ;;
-    mark_action)     cmd_mark_action "$@" ;;
     recent_actions)  cmd_recent_actions "$@" ;;
     cleanup)         cmd_cleanup "$@" ;;
     config_cadence)  cmd_config_cadence "$@" ;;

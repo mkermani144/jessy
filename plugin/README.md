@@ -13,7 +13,7 @@ agent scores extracted JSON.
 |------------------|------|
 | `/jessy:run`     | Full pass: scan + report. |
 | `/jessy:scan`    | Scan open LinkedIn tabs, score, persist. Needs `claude --chrome`. |
-| `/jessy:report`  | Render ranked cards; pick rows to open in Chrome; mark seen. |
+| `/jessy:report`  | Open ranked report in tmux/less; pick rows; mark seen. |
 | `/jessy:learn`   | Mine recent open/dismiss patterns; suggest `preferences.md` updates. |
 | `/jessy:cleanup` | Prune old / acted-on rows. Never touches unseen rows. |
 | `/jessy:config`  | Show path to `~/.jessy/config.yaml`; edit in your own editor. Onboards if missing. |
@@ -52,7 +52,7 @@ is already granted.
 ### Permissions / approval prompts
 
 The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
-list covering helper scripts, scan compound DB helpers, report flows,
+list covering helper scripts, scan compound DB helpers, report-session flow,
 Claude-in-Chrome MCP tools, the nested `Skill(jessy-learn)` handoff, and
 `Read` / `Edit` / `Write` scoped to `~/.jessy/`.
 
@@ -163,27 +163,30 @@ After `claude --plugin-dir ...`:
 16. `bash plugin/scripts/db.sh query_report` emits one JSON object per
     unseen row, sorted by score DESC. `query_report all` includes seen rows.
 17. `bash plugin/scripts/db.sh query_report | bash plugin/scripts/render_cards.sh`
-    prints box cards + compact lines + ignored tail.
-18. `bash plugin/scripts/db.sh mark_action <url> opened` updates the row;
-    next `query_report` (default scope `unseen`) excludes it.
-19. `/jessy:report` renders, prompts via AskUserQuestion multi-select,
-    opens picked URLs in Chrome, marks picks `opened` and rest `dismissed`,
-    prints `opened N; dismissed M; unseen 0`.
-20. `/jessy:run` runs `/jessy:scan` then `/jessy:report` in one shot.
+    prints box cards + compact lines + ignored tail for local inspection.
+18. `JESSY_REPORT_NO_TMUX=1 bash plugin/scripts/report_session.sh prepare`
+    prints only temp paths plus the pick prompt. It does not print cards,
+    JSONL, or the full index map into chat.
+19. `bash plugin/scripts/report_session.sh consume none` consumes that
+    snapshot and prints `opened 0; dismissed M; unseen 0.`.
+20. `/jessy:report` opens cards in tmux/less when available, prompts for
+    indices in chat, consumes the snapshot, and prints
+    `opened N; dismissed M; unseen 0.`.
+21. `/jessy:run` runs `/jessy:scan` then `/jessy:report` in one shot.
 
 ### Round 4
 
-21. `bash plugin/scripts/db.sh recent_actions 10` emits up to 10 acted-on
+22. `bash plugin/scripts/db.sh recent_actions 10` emits up to 10 acted-on
     rows JSONL, newest first.
-22. `bash plugin/scripts/db.sh cleanup 30 5000` prunes old acted-on rows;
+23. `bash plugin/scripts/db.sh cleanup 30 5000` prunes old acted-on rows;
     prints `pruned X; now Y rows`. Unseen rows survive regardless of age.
-23. `/jessy:cleanup` runs the skill — same output, reads thresholds from
+24. `/jessy:cleanup` runs the skill — same output, reads thresholds from
     `~/.jessy/config.yaml`.
-24. After enough acted-on history, `/jessy:report` auto-invokes
+25. After enough acted-on history, `/jessy:report` auto-invokes
     `/jessy:learn` when `jobs_since_last_learn >= cadence[idx]`.
     `meta_get jobs_since_last_learn` resets to `0` and
     `next_cadence_idx` advances by 1 (clamps to last).
-25. `/jessy:learn` prompts via AskUserQuestion with candidate patterns,
+26. `/jessy:learn` prompts via AskUserQuestion with candidate patterns,
     appends bullets under the right `preferences.md` section on consent.
 
 ## Layout
@@ -198,6 +201,8 @@ plugin/
     jessy-report/SKILL.md
     jessy-scan/SKILL.md
     platforms/linkedin/SKILL.md
+  agents/
+    jessy-linkedin-extractor.md
   commands/
     cleanup.md
     config.md
@@ -211,6 +216,7 @@ plugin/
     db_scan.sh
     install_bare_alias.sh
     onboard.sh
+    report_session.sh
     render_cards.sh
     schema.sql
   config/
@@ -218,6 +224,7 @@ plugin/
     preferences.example.md
   tests/
     check_db_attempts.sh
+    check_report_session.sh
     check_render_cards.sh
   README.md
 ```
