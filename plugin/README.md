@@ -7,8 +7,6 @@ custom Haiku `jessy-linkedin-extractor` subagent one card at a time for only
 new cards. Extractors do not receive preferences or scoring rubric; the main
 agent scores extracted JSON.
 
-See [`../PLAN.md`](../PLAN.md) for the current design.
-
 ## Commands
 
 | Command          | What |

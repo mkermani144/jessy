@@ -1,6 +1,6 @@
 # jessy config
 # Edit via: /jessy:config
-# Schema: see plugin/PLAN.md "Config" section.
+# Template copied to ~/.jessy/config.yaml during onboarding.
 
 threshold_match: 70           # score >= → match
 threshold_low_show: 30        # score >= → compact list entry; below → "+N ignored"
