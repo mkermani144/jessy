@@ -16,7 +16,11 @@ subcommands:
   init                              create DB and apply schema (idempotent)
   meta_get <key>                    print meta value (empty if absent; exit 0)
   meta_set <key> <val>              upsert meta value
-  seen <url>                        print "yes" or "no" (exit 0 in both cases)
+  attempted <url>                   print "yes" or "no" if URL was attempted
+  attempt_start <url> [platform]    persist scan attempt start; prints inserted/skipped
+  attempt_finish <url> <status> [extraction_json] [score] [rationale]
+                                    persist extraction/scoring outcome
+  seen <url>                        alias for attempted (backcompat)
   company_exists <name>             print "yes" or "no" (exit 0 in both cases)
   upsert_company <name> [size] [summary]
                                     insert or update company; print id
@@ -97,12 +101,87 @@ cmd_seen() {
   [[ -n "$url" ]] || { echo "db.sh: seen requires <url>" >&2; exit 2; }
   local out
   out=$(sqlite3 -bail -batch "$JESSY_DB" \
-    "SELECT 1 FROM jobs WHERE url = $(sql_quote "$url") LIMIT 1;")
+    "SELECT 1
+     WHERE EXISTS (SELECT 1 FROM job_attempts WHERE url = $(sql_quote "$url"))
+        OR EXISTS (SELECT 1 FROM jobs WHERE url = $(sql_quote "$url"))
+     LIMIT 1;")
   if [[ "$out" == "1" ]]; then
     echo yes
   else
     echo no
   fi
+}
+
+cmd_attempted() {
+  # Boundary check for normal scans. Any attempt row counts, including
+  # started/failed rows; legacy jobs rows also count.
+  cmd_seen "$@"
+}
+
+cmd_attempt_start() {
+  require_sqlite
+  local url="${1:-}" platform="${2:-linkedin}"
+  [[ -n "$url" ]] || { echo "db.sh: attempt_start requires <url> [platform]" >&2; exit 2; }
+  local before after
+  before=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM job_attempts;")
+  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+INSERT OR IGNORE INTO job_attempts(url, platform, status, started_ts)
+VALUES(
+  $(sql_quote "$url"),
+  $(sql_quote "$platform"),
+  'started',
+  CAST(strftime('%s','now') AS INTEGER)
+);
+SQL
+  after=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM job_attempts;")
+  if [[ "$after" -gt "$before" ]]; then
+    echo inserted
+  else
+    echo skipped
+  fi
+}
+
+cmd_attempt_finish() {
+  require_sqlite
+  local url="${1:-}" status="${2:-}" extraction_json="${3:-}" score="${4:-}" rationale="${5:-}"
+  [[ -n "$url" && -n "$status" ]] || {
+    echo "db.sh: attempt_finish requires <url> <status> [extraction_json] [score] [rationale]" >&2
+    exit 2
+  }
+  case "$status" in
+    ok|partial|failed|scored|accepted|rejected|deferred) ;;
+    *) echo "db.sh: attempt status invalid" >&2; exit 2 ;;
+  esac
+  if [[ -n "$score" && ! "$score" =~ ^-?[0-9]+$ ]]; then
+    echo "db.sh: score must be int" >&2
+    exit 2
+  fi
+  local score_sql="NULL"
+  [[ -n "$score" ]] && score_sql="$score"
+  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+INSERT INTO job_attempts(
+  url, platform, status, started_ts, finished_ts, error,
+  extraction_json, score, rationale
+)
+VALUES(
+  $(sql_quote "$url"),
+  'linkedin',
+  $(sql_quote "$status"),
+  CAST(strftime('%s','now') AS INTEGER),
+  CAST(strftime('%s','now') AS INTEGER),
+  CASE WHEN $(sql_quote "$status") = 'failed' THEN $(sql_quote "$rationale") ELSE NULL END,
+  $(sql_quote "$extraction_json"),
+  $score_sql,
+  $(sql_quote "$rationale")
+)
+ON CONFLICT(url) DO UPDATE SET
+  status = excluded.status,
+  finished_ts = excluded.finished_ts,
+  error = excluded.error,
+  extraction_json = excluded.extraction_json,
+  score = excluded.score,
+  rationale = excluded.rationale;
+SQL
 }
 
 # Print "yes"/"no" if a company row with this name exists.
@@ -161,6 +240,21 @@ VALUES(
   $(sql_quote "$rationale"),
   CAST(strftime('%s','now') AS INTEGER)
 );
+INSERT INTO job_attempts(url, platform, status, started_ts, finished_ts, score, rationale)
+VALUES(
+  $(sql_quote "$url"),
+  $(sql_quote "$platform"),
+  'scored',
+  CAST(strftime('%s','now') AS INTEGER),
+  CAST(strftime('%s','now') AS INTEGER),
+  $score,
+  $(sql_quote "$rationale")
+)
+ON CONFLICT(url) DO UPDATE SET
+  status = 'scored',
+  finished_ts = excluded.finished_ts,
+  score = excluded.score,
+  rationale = excluded.rationale;
 SQL
   after=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;")
   if [[ "$after" -gt "$before" ]]; then
@@ -369,19 +463,22 @@ cmd_mark_action() {
      WHERE url = $(sql_quote "$url");"
 }
 
-stub() {
-  echo "db.sh: subcommand \"$1\" not implemented yet" >&2
-  exit 2
-}
-
 main() {
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
   shift
+  # Keep old installs migrated when new subcommands hit existing DBs.
+  case "$sub" in
+    init|config_cadence|-h|--help|help) ;;
+    *) cmd_init ;;
+  esac
   case "$sub" in
     init)            cmd_init "$@" ;;
     meta_get)        cmd_meta_get "$@" ;;
     meta_set)        cmd_meta_set "$@" ;;
+    attempted)       cmd_attempted "$@" ;;
+    attempt_start)   cmd_attempt_start "$@" ;;
+    attempt_finish)  cmd_attempt_finish "$@" ;;
     seen)            cmd_seen "$@" ;;
     company_exists)  cmd_company_exists "$@" ;;
     upsert_company)  cmd_upsert_company "$@" ;;

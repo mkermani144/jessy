@@ -22,6 +22,21 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS jobs_ts ON jobs(ts);
 CREATE INDEX IF NOT EXISTS jobs_score ON jobs(score);
 
+CREATE TABLE IF NOT EXISTS job_attempts (
+  url TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_ts INTEGER NOT NULL,
+  finished_ts INTEGER,
+  error TEXT,
+  extraction_json TEXT,
+  score INTEGER,
+  rationale TEXT
+);
+
+CREATE INDEX IF NOT EXISTS job_attempts_started_ts ON job_attempts(started_ts);
+CREATE INDEX IF NOT EXISTS job_attempts_status ON job_attempts(status);
+
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT

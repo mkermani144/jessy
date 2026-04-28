@@ -2,7 +2,7 @@
 # Edit via: /jessy:config
 # Schema: see plugin/PLAN.md "Config" section.
 
-threshold_match: 70           # score >= → match (full card)
+threshold_match: 70           # score >= → match
 threshold_low_show: 30        # score >= → compact list entry; below → "+N ignored"
 
 cleanup:

@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(*/scripts/db.sh*)",
+      "Bash(*/scripts/db_scan.sh*)",
       "Bash(*/scripts/render_cards.sh*)",
       "Bash(*/scripts/onboard.sh*)",
 

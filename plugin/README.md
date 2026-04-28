@@ -2,10 +2,11 @@
 
 Claude Code plugin replacing Rust `jessy`. Drives Chrome via `claude --chrome`,
 scans LinkedIn job tabs, scores against user prefs, renders ranked report.
-Scan flow is two-stage to cut token burn: cheap card triage first, deep detail
-read only for likely / ambiguous jobs.
+Scan flow stops each tab/feed at the first Jessy-attempted card, then runs
+one extractor subagent at a time for only new cards. Extractors do not receive
+preferences or scoring rubric; the main agent scores extracted JSON.
 
-See [`PLAN.md`](PLAN.md) for the v1 design.
+See [`../PLAN.md`](../PLAN.md) for the current design.
 
 ## Commands
 
@@ -52,7 +53,7 @@ is already granted.
 ### Permissions / approval prompts
 
 The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
-list covering helper scripts, small Bash helpers used by scan/report flows,
+list covering helper scripts, scan compound DB helpers, report flows,
 Claude-in-Chrome MCP tools, the nested `Skill(jessy-learn)` handoff, and
 `Read` / `Edit` / `Write` scoped to `~/.jessy/`.
 
@@ -67,6 +68,10 @@ regardless of where the plugin is installed. `${CLAUDE_PLUGIN_ROOT}` is only
 for plugin skill/command content, not external settings files. One-time user
 actions still required: allow the Claude-in-Chrome extension on first `/chrome`
 use, and attach the session with `claude --chrome`.
+
+Scan DB work must be invoked as literal `db.sh` / `db_scan.sh` script calls.
+Do not wrap it in `$DB`, shell functions, or shell loops; those change the
+command shape and can trigger approval prompts.
 
 ### Optional: bare `/jessy` slash command
 
@@ -124,8 +129,8 @@ After `claude --plugin-dir ...`:
    - `~/.jessy/config.yaml`
    - `~/.jessy/preferences.md`
    - `~/.jessy/jessy.db`
-3. `sqlite3 ~/.jessy/jessy.db '.schema'` shows `companies`, `jobs`, `meta`
-   tables and `jobs_ts`, `jobs_score` indexes.
+3. `sqlite3 ~/.jessy/jessy.db '.schema'` shows `companies`, `jobs`,
+   `job_attempts`, `meta` tables plus related indexes.
 4. `bash plugin/scripts/db.sh meta_get jobs_since_last_learn` prints `0`.
 5. `bash plugin/scripts/db.sh meta_set foo bar && bash plugin/scripts/db.sh meta_get foo`
    prints `bar`.
@@ -146,12 +151,13 @@ After `claude --plugin-dir ...`:
     Re-run with empty `size`/`summary` keeps original values.
 12. `bash plugin/scripts/db.sh insert_job https://www.linkedin.com/jobs/view/1 1 "T" "D" '[]' '[]' linkedin 50 "r"`
     inserts a row.
-13. `bash plugin/scripts/db.sh seen https://www.linkedin.com/jobs/view/1`
-    exits 0; `... view/999` exits 1.
+13. `bash plugin/scripts/db.sh attempted https://www.linkedin.com/jobs/view/1`
+    prints `yes`; `... view/999` prints `no`. `seen` is a backcompat alias.
 14. `bash plugin/scripts/db.sh count` prints the row count.
 15. With `claude --chrome` and a LinkedIn search tab open,
     `/jessy:scan` walks pages, prints `scanned N new; M match; K low; L ignored`,
-    and rows appear in `jobs`. Re-running immediately scans 0 new (seen-skip).
+    and rows appear in `jobs` / `job_attempts`. Re-running immediately scans
+    0 new because the first attempted card stops each tab/feed.
 
 ### Round 3
 
@@ -203,6 +209,7 @@ plugin/
     scan.md
   scripts/
     db.sh
+    db_scan.sh
     install_bare_alias.sh
     onboard.sh
     render_cards.sh
@@ -210,7 +217,9 @@ plugin/
   config/
     config.example.yaml
     preferences.example.md
-  PLAN.md
+  tests/
+    check_db_attempts.sh
+    check_render_cards.sh
   README.md
 ```
 

@@ -106,13 +106,14 @@ that tab.
 - Long descriptions sometimes show a "See more" link — expand it before
   reading, otherwise the requirements section may be truncated.
 
-## Skip rules (read by jessy-scan)
+## Boundary / skip rules (read by jessy-scan)
 
 - Title prefilter: drop cards whose title matches any
   `linkedin.skip_title_keywords` (config) before opening.
-- Seen-skip: drop cards whose canonical URL is already in `jobs.url`.
-  Canonicalize by stripping query params except `currentJobId` (or use
-  `/jobs/view/<id>` as the canonical form).
+- Attempt boundary: if a canonical URL exists in Jessy's attempted state,
+  stop lower/older cards for that tab/feed. Do not use LinkedIn `viewed`.
+  Canonicalize by stripping query params except `currentJobId`, or use
+  `/jobs/view/<id>` as the canonical form.
 
 ## Auth + access
 

@@ -1,9 +1,10 @@
 ---
 name: jessy-scan
-description: Scan open LinkedIn job tabs in Chrome, score each against the user's preferences, and persist new jobs to ~/.jessy/jessy.db. Use when the user runs /jessy:scan or asks jessy to look for new jobs.
+description: Scan open LinkedIn job tabs in Chrome, extract unseen jobs, score against preferences in the main thread, and persist results to ~/.jessy/jessy.db. Use when the user runs /jessy:scan or asks jessy to look for new jobs.
 user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)
+  - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh*)
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh*)
   - Bash(test *)
   - Read
@@ -14,286 +15,260 @@ allowed-tools:
 
 # jessy-scan
 
-Orchestrates a scan pass: enumerate LinkedIn tabs → for each search,
-walk pages → for each visible card, run cheap prefilters → **stage 1
-card triage** (`skip` / `maybe` / `likely`) → **stage 2 detail
-extraction** (`lean` for `maybe`, `full` for `likely`) → optional
-`deepen` retry for lean ambiguous cards → main thread writes DB rows.
-Bumps learning counter. Prints count + phase timing summary.
+Normal scan is bounded by Jessy history, not by LinkedIn viewed labels.
+Walk each LinkedIn tab/feed top-down. At the first Jessy-attempted card in
+that tab/feed, stop lower/older cards and move to the next tab/feed.
 
-Why two-stage: per-card DOM and company-page fetch are the bulk of token
-cost. Spend almost nothing on obvious losers, spend a little on maybes,
-spend full tokens only on promising cards.
+Subagents are extractors only. They receive one URL/card, no preferences,
+no rubric, no fit judgment. Run them serialized, one at a time. Main thread
+owns matching, scoring, DB writes, learning counters, and summary output.
 
 Runs against a live Chrome session via `claude --chrome`. Page semantics
-in `skills/platforms/linkedin/SKILL.md` (auto-loads on linkedin URLs).
-Per-card subagent prompt template: `card-task.md` in this skill dir.
+live in `skills/platforms/linkedin/SKILL.md`. Per-card extractor prompt:
+`card-task.md`.
 
 ## Preconditions
 
-1. `~/.jessy/config.yaml` exists. If not, run
-   `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh` first, then continue.
+1. `~/.jessy/config.yaml` exists. If missing, run
+   `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh`, then continue.
 2. Chrome session is attached (`claude --chrome`).
 3. User is signed into LinkedIn in that Chrome profile.
-4. On first Chrome-extension prompt, tell the user to allow access for the
-   upcoming LinkedIn tab reads. Do not ask again unless Chrome prompts again.
+4. On first Chrome-extension prompt, tell the user to allow the upcoming
+   LinkedIn tab reads. Do not ask again unless Chrome prompts again.
 
 ## Inputs
 
 Read once at start:
 
-- `~/.jessy/config.yaml` → `threshold_match`, `threshold_low_show`,
-  `linkedin.max_pages`, `linkedin.skip_title_keywords`,
-  `linkedin.startup_urls`, `cleanup.prompt_when_over`.
-- `~/.jessy/preferences.md` → Dealbreakers / Dislikes / Likes / Notes sections.
-  Hold the **full text** in a variable (`prefs_text`) — you will pass it
-  to stage-2 subagents. Also extract bullets under:
-  - `## Dealbreakers` → `dealbreakers`
-  - `## Dislikes` → `dislikes`
-  - `## Likes` → `likes`
+- Run `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh init` once to migrate old DBs.
+- `~/.jessy/config.yaml`:
+  - `threshold_match`
+  - `threshold_low_show`
+  - `linkedin.max_pages`
+  - `linkedin.skip_title_keywords`
+  - `linkedin.startup_urls`
+  - `cleanup.prompt_when_over`
+- `~/.jessy/preferences.md`: full main-thread preference context.
+  Extract bullets under `## Dealbreakers`, `## Dislikes`, `## Likes`.
+- `${CLAUDE_PLUGIN_ROOT}/skills/jessy-scan/card-task.md`: extractor
+  contract to inline into each Agent prompt.
 
-Also initialize:
+Maintain timers: `discover_ms`, `card_read_ms`, `db_ms`, `extract_ms`,
+`score_ms`, `total_ms`.
 
-- Phase timers: `scan_start`, plus cumulative `discover_ms`,
-  `card_read_ms`, `prefilter_ms`, `stage2_ms`, `db_ms`.
-- Small in-memory caches for this run:
-  - `seen_cache[canonical_url] -> yes|no`
-  - `company_known_cache[company_name_lower] -> true|false`
+Maintain `attempted_cache[canonical_url] -> yes|no`.
+
+## Permission Discipline
+
+Claude Code permission matching is command-shaped. During scan, every Bash
+call must start with one literal script path:
+
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh ...`
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh ...`
+- `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh ...`
+
+Do not use shell variables (`DB=...`, `$DB ...`), shell functions
+(`skip_one`), command substitution (`cid=$(...)`), pipes, or shell
+`for`/`while` loops around DB work. Use one script invocation per Bash call.
+For repeated attempt checks, call `db_scan.sh attempted_many <url...>` once.
+For direct skips and scored rows, use `db_scan.sh` compound commands below.
 
 ## Procedure
 
 ### 1. Discover scan tabs
 
-Time this section as `discover_ms`.
+List Chrome tabs. Keep LinkedIn jobs search / collection tabs per the
+linkedin platform skill.
 
-List the open tabs in Chrome. Keep only tabs whose URL matches the
-LinkedIn search/collection patterns (see linkedin SKILL.md).
+If no LinkedIn scan tabs are open and `linkedin.startup_urls` is non-empty,
+open each startup URL in a new tab and treat those as scan tabs.
 
-If no LinkedIn tabs are open AND `linkedin.startup_urls` is non-empty,
-open each `startup_url` in a new tab and treat those as the scan tabs.
+If still none, print `no LinkedIn job tabs to scan` and stop.
 
-If still none, print "no LinkedIn job tabs to scan" and stop.
+### 2. Walk each scan tab
 
-### 2. For each scan tab
+For each tab:
 
-Track: `page_index = 0`, `prev_first_urls = []`, `pages_walked = 0`.
+- `prev_first_urls = []`
+- `pages_walked = 0`
+- `stop_this_tab = false`
 
-While `pages_walked < linkedin.max_pages`:
+While `pages_walked < linkedin.max_pages` and `stop_this_tab=false`:
 
-a. Scroll the job-card list to the bottom to materialize all cards.
-b. Read the visible job cards: title, canonical URL (`/jobs/view/<id>`).
-   Time card DOM reads as `card_read_ms`.
-c. **Same-list stop** — first 3 URLs equal `prev_first_urls` ⇒ stop walking
-   this tab (pager did not advance).
-d. Update `prev_first_urls` = first 3 URLs.
-e. **Cheap prefilter + stage-1 triage** (no detail click, no subagent).
-   Time this cheap decision work as `prefilter_ms`.
-   For each visible card, in order:
-   - Canonicalize the URL to `https://www.linkedin.com/jobs/view/<id>`
-     (strip query params; keep only the id).
-   - **Seen-skip**: look up `canonical_url` in `seen_cache`; on miss call
-     `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh seen <canonical_url>` once and
-     cache `yes|no`. `yes` ⇒ skip card.
-   - **Skip-title-keywords**: title (case-insensitive substring) matches
-     any `linkedin.skip_title_keywords` value ⇒ skip card.
-   - **Title-only dealbreaker prefilter**: for each bullet in
-     `dealbreakers`, case-insensitive substring match against the
-     card title alone. On match, write a score=0 row directly — no
-     detail click, no subagent — using the card title and the matched
-     bullet as the rationale:
-     ```
-     cid=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh upsert_company "<card_company_name>" "" "")
-     ${CLAUDE_PLUGIN_ROOT}/scripts/db.sh insert_job <canonical_url> "$cid" "<card_title>" "" '[]' '[]' \
-       linkedin 0 "dealbreaker (title): <bullet>"
-     ```
-     On successful insert, set `seen_cache[canonical_url]=yes`.
-     Tally as `ignored`. Move on.
-   - Capture any cheap card metadata visible without opening detail:
-     `card_company_name`, `card_location`, visible badges/tags, and a
-     short snippet/preview if LinkedIn shows one on the card.
-   - **Stage 1 route** using card-only evidence:
-     - `skip`: only for strong negatives visible already on the card.
-       Use sparingly. Good examples: explicit on-site location conflict,
-       explicit seniority/domain/company-name dislike, or multiple clear
-       negatives with no visible like. On `skip`, insert a partial row
-       directly:
-       ```
-       cid=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh upsert_company "<card_company_name>" "" "")
-       ${CLAUDE_PLUGIN_ROOT}/scripts/db.sh insert_job <canonical_url> "$cid" "<card_title>" "<card_snippet_or_empty>" \
-         '[]' '[]' linkedin <score_below_threshold_low_show> "stage1 skip: <reason>"
-       ```
-       On successful insert, set `seen_cache[canonical_url]=yes`.
-       Choose an integer score strictly below `threshold_low_show`
-       (typically `threshold_low_show - 1`, clamped at 0). Tally as
-       `ignored`. Move on.
-     - `likely`: at least one clear positive card signal and no strong
-       negative. Examples: title/stack/location/company clearly align.
-     - `maybe`: mixed, weak, or insufficient evidence. On uncertainty,
-       prefer `maybe`, not `skip`.
-   - Add `likely` cards to `likely_list`. Add `maybe` cards to
-     `maybe_list`. Keep `canonical_url`, `card_title`,
-     `card_company_name`, cheap card metadata, and a short
-     `route_reason`.
-f. **Dispatch stage-2 subagents**.
-   - `likely_list` → call `card-task.md` with `scan_mode=full`
-   - `maybe_list` → call `card-task.md` with `scan_mode=lean`
-   To parallelize, issue multiple Task calls in a single message
-   (small batches, e.g. 3-5 at a time, to stay polite to LinkedIn).
-   For each card pass:
-   - `canonical_url`
-   - `card_title`
-   - `card_company_name`
-   - `card_location`
-   - `card_badges`
-   - `card_snippet`
-   - `route_reason`
-   - `scan_mode` = `lean` or `full`
-   - `prefs_text` (full prefs)
-   - `company_already_known` = cached result for normalized
-     `card_company_name`; on miss call
-     `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh company_exists
-     "<card_company_name>"` once and cache it (`yes` → `true`)
-   - `scoring_rubric` = the rubric block below
-   The subagent returns one JSON line. See `card-task.md` for the exact
-   shapes.
-   Time all Task dispatch + waits as `stage2_ms`; time only DB calls as
-   `db_ms`.
-g. **Apply each subagent result** in the main thread:
-   - On `error: login_wall` ⇒ stop scanning this tab; surface to user;
-     continue other tabs.
-   - On `error: detail_load_failed` ⇒ skip (no DB row, do not mark seen).
-   - On `decision: deepen` ⇒ immediately re-dispatch that same card once
-     with `scan_mode=full`. Do not write a DB row yet. Use the same
-     `canonical_url`, card metadata, prefs, and route reason.
-   - Otherwise:
-     ```
-     cid=$(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh upsert_company "<company_name>" "<company_size>" "<company_summary>")
-     ${CLAUDE_PLUGIN_ROOT}/scripts/db.sh insert_job <url> "$cid" "<title>" "<desc>" \
-       '<req_hard_json>' '<req_nice_json>' linkedin <score> "<rationale>"
-     ```
-     If `company_already_known` was true (size/summary may be empty),
-     `upsert_company` is still called (it preserves existing values via
-     `COALESCE NULLIF`). Lean-mode final rows typically leave
-     `company_size` / `company_summary` empty.
-     On successful insert, set `seen_cache[url]=yes` and
-     `company_known_cache[company_name_lower]=true`.
-   - Tally counts: `new` (inserted), `match` (score ≥ `threshold_match`),
-     `low` (score in `[threshold_low_show, threshold_match)`),
-     `ignored` (score < `threshold_low_show`).
-h. Click next-page (or scroll for infinite scroll). Increment
-   `pages_walked`. Loop.
+1. Scroll the job-card list to the bottom to materialize cards.
+2. Read visible cards in list order:
+   - title
+   - canonical URL
+   - company
+   - location
+   - badges/tags
+   - short visible snippet if present
+3. Same-list stop: if first 3 canonical URLs equal `prev_first_urls`, stop
+   this tab. Otherwise set `prev_first_urls` to the current first 3.
+4. For each visible card, in order:
+   - Canonicalize to `https://www.linkedin.com/jobs/view/<id>`; strip query
+     params and keep only the ID.
+   - Attempt boundary: call
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempted <canonical_url>` on
+     cache miss. If `yes`, set `stop_this_tab=true` and stop lower/older
+     cards in this tab/feed. Continue the next tab/feed.
+     If checking several visible card URLs at once, use:
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh attempted_many <url...>`
+   - Ignore LinkedIn `viewed`; it is not a boundary.
+   - Title skip keywords: if title matches any
+     `linkedin.skip_title_keywords`, persist with:
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job <url> <company> <title> <snippet> 0 "skip title: <keyword>"`
+     Count ignored, cache attempted `yes`, continue.
+   - Title-only dealbreaker: if a dealbreaker bullet matches the title,
+     persist with `db_scan.sh skip_job` and rationale
+     `dealbreaker (title): <bullet>`. Count ignored, continue.
+   - Otherwise persist attempt start:
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> linkedin`
+   - Call one extractor subagent. Do not dispatch another extractor until
+     this one returns.
+   - Extractor input:
+     - canonical URL
+     - card title
+     - card company
+     - card location
+     - card badges/tags
+     - card snippet
+   - Extractor must return strict JSON only. No markdown. No fit judgment.
+   - If extractor reports a mechanical load issue (`timeout`,
+     `load_failed`, `detail_not_loaded`), retry once immediately for that
+     same card. Do not retry auth/removed/invalid/not_job failures.
+   - Persist extraction outcome:
+     - `status=ok|partial`: finish attempt with extractor JSON, then score.
+     - `status=failed`: finish attempt as `failed`; no normal-scan retry.
+       Failed rows count as attempted and future scan boundary.
+   - Score in the main thread from extractor JSON + preferences only.
+   - Insert the scored row with one call:
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job <url> <company> <company_size> <title> <desc> <req_json> <nice_json> <score> <rationale> <extract_json>`
+   - Tally:
+     - `new`: successful job insert or failed extraction attempt
+     - `match`: score >= `threshold_match`
+     - `low`: score in `[threshold_low_show, threshold_match)`
+     - `ignored`: score < `threshold_low_show` or failed/skip attempt
+5. If not stopped, click next-page or continue infinite scroll. Increment
+   `pages_walked`.
 
-### 3. After all tabs
+### 3. Main Scoring
 
-- If `new > 0`: `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_get
-  jobs_since_last_learn` → add `new`, write back via
-  `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh meta_set jobs_since_last_learn
-  <total>`. If `new == 0`, skip both calls.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh count` → if total >
-  `cleanup.prompt_when_over`, print a hint:
-  "DB has X rows; consider /jessy:cleanup".
-- Print one-line summary: `scanned N new; M match; K low; L ignored`.
-- Print one-line timing summary:
-  `timing discover=Xms card_read=Yms prefilter=Zms stage2=Ams db=Bms total=Cms`.
+Extractor JSON is the only job evidence. Main thread may infer domain, role
+shape, fit, misfit, and uncertainty from these fields:
 
-## Subagent prompt template (per card)
+- `title`
+- `company`
+- `company_size`
+- `location`
+- `seniority`
+- `employment`
+- `salary`
+- `visa`
+- `req`
+- `nice`
+- `summary`
+- `evidence`
 
-Use the Task tool. Concrete instructions live in
-`${CLAUDE_PLUGIN_ROOT}/skills/jessy-scan/card-task.md` — read it once at
-scan start and inline it into each Task prompt, with the per-card inputs
-substituted.
-
-Inputs the subagent receives:
-
-- `canonical_url` — `https://www.linkedin.com/jobs/view/<id>`
-- `card_title` — title from the search list (informational)
-- `card_company_name`, `card_location`, `card_badges`, `card_snippet`
-  — cheap card metadata already visible on the search list
-- `route_reason` — one short line explaining why stage 1 chose this path
-- `scan_mode` — `lean` or `full`
-- `prefs_text` — full preferences.md text (Dealbreakers / Dislikes /
-  Likes / Notes)
-- `company_already_known` — `true` or `false` (skip company page fetch
-  when `true`)
-- `scoring_rubric` — the rubric block below
-
-The subagent must return **exactly one JSON line**, no prose.
-
-Final row shape:
-
-```
-{"url":"<canonical_url>","title":"<str>","company_name":"<str>","company_size":"<str>","company_summary":"<str>","desc":"<str>","req_hard":["..."],"req_nice":["..."],"score":<int 0-100>,"rationale":"<str>"}
-```
-
-Lean-mode deepen sentinel:
-
-```
-{"url":"<canonical_url>","decision":"deepen"}
-```
-
-These keys map 1:1 to `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh upsert_company`
-(`company_name`, `company_size`, `company_summary`) and
-`${CLAUDE_PLUGIN_ROOT}/scripts/db.sh insert_job` (`url`,
-`title`, `desc`, `req_hard`, `req_nice`, `score`, `rationale`).
-When `company_already_known` is `true`, the subagent returns empty
-`company_size` / `company_summary` (the existing row is preserved).
-
-Error sentinels:
-- `{"url":"<canonical_url>","error":"detail_load_failed"}` — skip card.
-- `{"url":"<canonical_url>","error":"login_wall"}` — stop tab.
-
-## Scoring rubric
-
-For each job, compare `req_hard` + `req_nice` + `desc` + company summary
-against the prefs sections:
-
-| signal              | hard req           | nice req |
-|---------------------|--------------------|----------|
-| dealbreaker match   | force score = 0    | force score = 0 |
-| dislike match       | -25                | -8       |
-| like match          | +20                | +8       |
-| unmentioned         |  0                 |  0       |
-
-Algorithm:
+Scoring algorithm:
 
 1. Start `score = 50`.
-2. If any dealbreaker matches anywhere (req_hard, req_nice, desc, or
-   company), set `score = 0` and stop (rationale must cite the dealbreaker).
-3. Otherwise sum deltas across all matched dislikes/likes (each pref bullet
-   counts at most once — across hard+nice, take the larger penalty/bonus).
-4. Clamp to `[0, 100]`.
-5. `rationale` = one short line (≤ ~100 chars) citing the top 1-2 reasons,
-   e.g. `Rust + remote EU like; small startup match`. For score-0 cases,
-   cite the dealbreaker, e.g. `dealbreaker: Java primary stack`.
+2. If any dealbreaker matches `req`, `nice`, `summary`, `location`,
+   `employment`, `visa`, title, or evidence: force `score = 0`.
+3. Otherwise apply each preference bullet once:
+   - dislike in `req` / `summary`: `-25`
+   - dislike in `nice` / weak evidence: `-8`
+   - like in `req` / `summary`: `+20`
+   - like in `nice` / weak evidence: `+8`
+4. Clamp score to `[0, 100]`.
+5. Choose decision:
+   - `accept`: score >= `threshold_match`
+   - `maybe`: score >= `threshold_low_show`
+   - `reject`: score < `threshold_low_show`
+   - `defer`: useful data missing but not failed
+6. Rationale: one line, <= 100 chars, citing top 1-2 reasons.
 
-Matching is semantic, not literal — "Postgres" matches a "PostgreSQL" like;
-"on-site NL only" matches a job that says "must be in Amsterdam office".
+## Extractor Output
 
-## Field formats for `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh insert_job`
+Strict JSON object:
 
-- `<url>`: canonical `https://www.linkedin.com/jobs/view/<id>` (strip
-  query params; keep only the id).
-- `<company_id>`: integer printed by
-  `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh upsert_company`.
-- `<title>`, `<desc>`, `<rationale>`: plain text. Quote bash-safely.
-- `<req_hard>`, `<req_nice>`: JSON arrays of strings, e.g. `["Rust","5+ yrs"]`.
-  Use `[]` for empty.
-- `<platform>`: literal `linkedin`.
-- `<score>`: integer 0-100.
+```json
+{
+  "status": "ok",
+  "url": "https://www.linkedin.com/jobs/view/123",
+  "lang": "en",
+  "title": "Staff Backend Engineer",
+  "company": "Acme",
+  "company_size": "unknown",
+  "location": "remote US",
+  "seniority": "staff",
+  "employment": "full_time",
+  "salary": "unknown",
+  "visa": "unknown",
+  "req": ["8 years backend", "rust", "distributed systems"],
+  "nice": ["kubernetes"],
+  "summary": ["Build backend services", "Own production systems"],
+  "evidence": ["Remote - United States", "8+ years backend engineering"]
+}
+```
 
-## Error handling
+Status values:
 
-- Subagent returns `error: login_wall` → stop scanning that tab, surface
-  to user, continue other tabs.
-- Subagent returns `error: detail_load_failed` → skip the card, do NOT
-  mark it seen (no DB row), continue.
-- Subagent returns malformed JSON → skip the card, log briefly, continue.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh insert_job` fails → log and
-  continue; partial scans are OK.
+- `ok`: useful detail loaded.
+- `partial`: some useful detail loaded, key fields missing.
+- `failed`: no useful detail.
 
-## What this skill does NOT do
+Field caps:
 
-- Render the report (that's `/jessy:report`, later round).
-- Mark `user_action` (that's the report flow).
-- Trigger learning (report flow checks the cadence).
-- Auto-apply / fill forms.
+- `req`: max 10
+- `nice`: max 5
+- `summary`: max 4
+- `evidence`: max 4
+- each string: max 120 chars
+- no full job description
+- no repeated boilerplate
+
+Enums:
+
+- `seniority`: `intern|junior|mid|senior|staff|principal|exec|unknown`
+- `employment`: `full_time|contract|part_time|internship|unknown`
+
+## DB Writes
+
+Use:
+
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempted <url>` for boundary checks.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh attempted_many <url...>` for
+  batch boundary checks without shell loops.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> linkedin` before
+  extraction.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job ...` for title skips.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job ...` for scored rows.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh fail_attempt ...` for failed
+  extraction.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh bump_learn <new>` after
+  all tabs.
+
+For failed extraction, do not insert a reportable job unless there is enough
+card data to create a useful ignored row. Always finish the attempt as
+`failed`.
+
+## After All Tabs
+
+- If `new > 0`: call
+  `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh bump_learn <new>`.
+- Check row count. If over `cleanup.prompt_when_over`, print:
+  `DB has X rows; consider /jessy:cleanup`.
+- Print: `scanned N new; M match; K low; L ignored`.
+- Print timing:
+  `timing discover=Xms card_read=Yms extract=Zms score=Ams db=Bms total=Cms`.
+
+## Forbidden In Normal Scan
+
+- No per-card judge subagents.
+- No parallel extractor batches.
+- No lean/full/deepen flow.
+- No preferences or scoring rubric in extractor prompts.
+- No company-page browsing.
+- No extra tabs during extraction.
+- No LinkedIn `viewed` boundary logic.
