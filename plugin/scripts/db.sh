@@ -276,10 +276,20 @@ SELECT json_object(
   'ts',              j.ts,
   'company_name',    COALESCE(c.name, ''),
   'company_size',    COALESCE(c.size, ''),
-  'company_summary', COALESCE(c.summary, '')
+  'company_summary', COALESCE(c.summary, ''),
+  'extract_status',  COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.status') END, ''),
+  'extract_lang',    COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.lang') END, ''),
+  'location',        COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.location') END, ''),
+  'seniority',       COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.seniority') END, ''),
+  'employment',      COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.employment') END, ''),
+  'salary',          COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.salary') END, ''),
+  'visa',            COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.visa') END, ''),
+  'extract_summary', COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.summary') END, '[]'),
+  'evidence',        COALESCE(CASE WHEN json_valid(a.extraction_json) THEN json_extract(a.extraction_json, '$.evidence') END, '[]')
 )
 FROM jobs j
 LEFT JOIN companies c ON c.id = j.company_id
+LEFT JOIN job_attempts a ON a.url = j.url
 $where
 ORDER BY j.score DESC, j.ts DESC;
 SQL

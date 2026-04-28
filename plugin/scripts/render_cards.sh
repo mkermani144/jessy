@@ -126,24 +126,40 @@ printf '%s' "$INPUT" | jq -rs \
      end);
 
   def parse_arr($s):
-    $s as $x | try ($x | fromjson) catch (
-      if ($x // "") == "" then [] else [$x] end
-    );
+    $s as $x |
+    if ($x | type) == "array" then ($x | map(tostring))
+    else (try ($x | fromjson) catch null) as $parsed |
+      if ($parsed | type) == "array" then ($parsed | map(tostring))
+      elif ($x // "") == "" then []
+      elif $parsed != null then [$parsed | tostring]
+      else [$x]
+      end
+    end;
 
   def card($idx):
     (parse_arr(.req_hard) | join(", ")) as $must |
     (parse_arr(.req_nice) | join(", ")) as $nice |
-    ([.company_name, .company_size, .company_summary]
-      | map(select(. != null and . != ""))
-      | join(" — ")) as $comp |
+    (parse_arr(.extract_summary) | join(", ")) as $extract_summary |
+    (parse_arr(.evidence) | join(", ")) as $evidence |
     [
       header($idx; .score; .title),
-      row("Summary"; .desc;      3),
-      row("Must";    $must;      3),
-      row("Nice";    $nice;      2),
-      row("Company"; $comp;      3),
-      row("Why";     .rationale; 3),
-      row("Link";    .url;       2),
+      row("Status";        .extract_status; 1),
+      row("Url";           .url;            2),
+      row("Lang";          .extract_lang;   1),
+      row("Title";         .title;          2),
+      row("Company";       .company_name;   2),
+      row("Company Size";  .company_size;   1),
+      row("Location";      .location;       2),
+      row("Seniority";     .seniority;      1),
+      row("Employment";    .employment;     1),
+      row("Salary";        .salary;         1),
+      row("Visa";          .visa;           1),
+      row("Req";           $must;           4),
+      row("Nice";          $nice;           3),
+      row("Summary";       $extract_summary;4),
+      row("Evidence";      $evidence;       4),
+      row("Company Notes"; .company_summary;3),
+      row("Why";           .rationale;      3),
       "╰" + ("─" * ($W - 2)) + "╯"
     ] | join("\n");
 

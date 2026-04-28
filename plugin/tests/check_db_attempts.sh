@@ -37,9 +37,18 @@ grep -q $'https://www.linkedin.com/jobs/view/404\tno' <<<"$many"
 [[ "$("$SCAN_DB" skip_job https://www.linkedin.com/jobs/view/3 Acme Intern "" 0 "skip title: intern")" == "inserted" ]]
 [[ "$("$DB" attempted https://www.linkedin.com/jobs/view/3)" == "yes" ]]
 
-extract='{"status":"ok","url":"https://www.linkedin.com/jobs/view/4"}'
+extract='{"status":"ok","url":"https://www.linkedin.com/jobs/view/4","lang":"en","location":"remote US","seniority":"senior","employment":"full_time","salary":"unknown","visa":"unknown","summary":["Build APIs"],"evidence":["Remote - United States"]}'
 [[ "$("$SCAN_DB" score_job https://www.linkedin.com/jobs/view/4 Acme unknown Engineer desc '["rust"]' '[]' 75 good "$extract")" == "inserted" ]]
 [[ "$("$DB" attempted https://www.linkedin.com/jobs/view/4)" == "yes" ]]
+report="$("$DB" query_report)"
+grep -q '"extract_status":"ok"' <<<"$report"
+grep -q '"location":"remote US"' <<<"$report"
+grep -q '"seniority":"senior"' <<<"$report"
+grep -q '"employment":"full_time"' <<<"$report"
+grep -q '"salary":"unknown"' <<<"$report"
+grep -q '"visa":"unknown"' <<<"$report"
+grep -q '"extract_summary":\["Build APIs"\]' <<<"$report"
+grep -q '"evidence":\["Remote - United States"\]' <<<"$report"
 
 "$SCAN_DB" fail_attempt https://www.linkedin.com/jobs/view/5 detail_not_loaded '{"status":"failed"}'
 [[ "$("$DB" attempted https://www.linkedin.com/jobs/view/5)" == "yes" ]]
