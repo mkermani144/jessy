@@ -2,9 +2,10 @@
 
 Claude Code plugin replacing Rust `jessy`. Drives Chrome via `claude --chrome`,
 scans LinkedIn job tabs, scores against user prefs, renders ranked report.
-Scan flow stops each tab/feed at the first Jessy-attempted card, then runs
-one extractor subagent at a time for only new cards. Extractors do not receive
-preferences or scoring rubric; the main agent scores extracted JSON.
+Scan flow stops each tab/feed at the first Jessy-attempted card, then runs the
+custom Haiku `jessy-linkedin-extractor` subagent one card at a time for only
+new cards. Extractors do not receive preferences or scoring rubric; the main
+agent scores extracted JSON.
 
 See [`../PLAN.md`](../PLAN.md) for the current design.
 

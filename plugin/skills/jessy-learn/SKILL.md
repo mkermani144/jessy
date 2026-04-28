@@ -1,6 +1,8 @@
 ---
 name: jessy-learn
 description: Mine the user's recent open / dismiss decisions, propose lopsided patterns as candidate preference updates, and (with consent) rewrite ~/.jessy/preferences.md. Use when the report skill detects the learn cadence has been hit, or when the user runs /jessy:learn directly.
+model: sonnet
+effort: medium
 user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)

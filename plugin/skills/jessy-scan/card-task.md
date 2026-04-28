@@ -1,8 +1,8 @@
 # jessy-scan extractor task
 
-You are an extractor subagent for exactly one LinkedIn job card. Main thread
-handles enumeration, preferences, scoring, and DB writes. You return strict
-JSON only.
+Invoke the custom `jessy-linkedin-extractor` Agent for exactly one LinkedIn
+job card. Main thread handles enumeration, preferences, scoring, and DB
+writes. The Agent returns strict JSON only.
 
 ## Inputs
 
@@ -13,7 +13,7 @@ JSON only.
 - `card_badges`: visible badges/tags from the list
 - `card_snippet`: visible preview text from the list
 
-You do not receive user preferences or scoring rubric.
+Do not send user preferences or scoring rubric to the Agent.
 
 ## Task
 

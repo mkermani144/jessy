@@ -1,6 +1,8 @@
 ---
 name: jessy-report
 description: Render the ranked jessy job report from ~/.jessy/jessy.db, prompt the user to pick which jobs to open in Chrome, mark picks opened and the rest dismissed, and check the learning cadence. Use when the user runs /jessy:report or /jessy.
+model: haiku
+effort: low
 user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)

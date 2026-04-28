@@ -1,6 +1,8 @@
 ---
 name: jessy-scan
 description: Scan open LinkedIn job tabs in Chrome, extract unseen jobs, score against preferences in the main thread, and persist results to ~/.jessy/jessy.db. Use when the user runs /jessy:scan or asks jessy to look for new jobs.
+model: sonnet
+effort: low
 user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)
@@ -19,12 +21,14 @@ Normal scan is bounded by Jessy history, not by LinkedIn viewed labels.
 Walk each LinkedIn tab/feed top-down. At the first Jessy-attempted card in
 that tab/feed, stop lower/older cards and move to the next tab/feed.
 
-Subagents are extractors only. They receive one URL/card, no preferences,
-no rubric, no fit judgment. Run them serialized, one at a time. Main thread
-owns matching, scoring, DB writes, learning counters, and summary output.
+Use the custom `jessy-linkedin-extractor` Agent for extraction. It runs on
+Haiku with a narrow extraction-only prompt. Extractors receive one URL/card,
+no preferences, no rubric, no fit judgment. Run them serialized, one at a
+time. Main thread owns matching, scoring, DB writes, learning counters, and
+summary output.
 
 Runs against a live Chrome session via `claude --chrome`. Page semantics
-live in `skills/platforms/linkedin/SKILL.md`. Per-card extractor prompt:
+live in `skills/platforms/linkedin/SKILL.md`. Per-card Agent input prompt:
 `card-task.md`.
 
 ## Preconditions
@@ -45,18 +49,22 @@ Read once at start:
   - `threshold_match`
   - `threshold_low_show`
   - `linkedin.max_pages`
+  - `linkedin.max_new_per_run` (default 20 if missing)
   - `linkedin.skip_title_keywords`
   - `linkedin.startup_urls`
   - `cleanup.prompt_when_over`
 - `~/.jessy/preferences.md`: full main-thread preference context.
   Extract bullets under `## Dealbreakers`, `## Dislikes`, `## Likes`.
-- `${CLAUDE_PLUGIN_ROOT}/skills/jessy-scan/card-task.md`: extractor
-  contract to inline into each Agent prompt.
+- `${CLAUDE_PLUGIN_ROOT}/skills/jessy-scan/card-task.md`: per-card input
+  contract to send to the `jessy-linkedin-extractor` Agent.
 
 Maintain timers: `discover_ms`, `card_read_ms`, `db_ms`, `extract_ms`,
 `score_ms`, `total_ms`.
 
 Maintain `attempted_cache[canonical_url] -> yes|no`.
+Maintain `cap_hit = false` and `stop_scan = false`. `new` counts every newly
+attempted unattempted card, including skipped, failed, partial, and scored
+cards.
 
 ## Permission Discipline
 
@@ -87,13 +95,14 @@ If still none, print `no LinkedIn job tabs to scan` and stop.
 
 ### 2. Walk each scan tab
 
-For each tab:
+For each tab while `stop_scan=false`:
 
 - `prev_first_urls = []`
 - `pages_walked = 0`
 - `stop_this_tab = false`
 
-While `pages_walked < linkedin.max_pages` and `stop_this_tab=false`:
+While `pages_walked < linkedin.max_pages`, `stop_this_tab=false`, and
+`stop_scan=false`:
 
 1. Scroll the job-card list to the bottom to materialize cards.
 2. Read visible cards in list order:
@@ -115,17 +124,23 @@ While `pages_walked < linkedin.max_pages` and `stop_this_tab=false`:
      If checking several visible card URLs at once, use:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh attempted_many <url...>`
    - Ignore LinkedIn `viewed`; it is not a boundary.
+   - Scan cap: after confirming the card is unattempted, if
+     `new >= linkedin.max_new_per_run`, set `cap_hit=true`,
+     `stop_scan=true`, and stop all remaining cards/tabs without writing an
+     attempt for this card.
    - Title skip keywords: if title matches any
      `linkedin.skip_title_keywords`, persist with:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job <url> <company> <title> <snippet> 0 "skip title: <keyword>"`
-     Count ignored, cache attempted `yes`, continue.
+     Count new and ignored, cache attempted `yes`, continue.
    - Title-only dealbreaker: if a dealbreaker bullet matches the title,
      persist with `db_scan.sh skip_job` and rationale
-     `dealbreaker (title): <bullet>`. Count ignored, continue.
+     `dealbreaker (title): <bullet>`. Count new and ignored, cache attempted
+     `yes`, continue.
    - Otherwise persist attempt start:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> linkedin`
-   - Call one extractor subagent. Do not dispatch another extractor until
-     this one returns.
+     Count new and cache attempted `yes`.
+   - Use the Agent tool with subagent type `jessy-linkedin-extractor`. Do not
+     dispatch another extractor until this one returns.
    - Extractor input:
      - canonical URL
      - card title
@@ -145,7 +160,8 @@ While `pages_walked < linkedin.max_pages` and `stop_this_tab=false`:
    - Insert the scored row with one call:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job <url> <company> <company_size> <title> <desc> <req_json> <nice_json> <score> <rationale> <extract_json>`
    - Tally:
-     - `new`: successful job insert or failed extraction attempt
+     - `new`: every newly attempted unattempted card, including skipped,
+       failed, partial, and scored cards
      - `match`: score >= `threshold_match`
      - `low`: score in `[threshold_low_show, threshold_match)`
      - `ignored`: score < `threshold_low_show` or failed/skip attempt
@@ -260,6 +276,8 @@ card data to create a useful ignored row. Always finish the attempt as
 - Check row count. If over `cleanup.prompt_when_over`, print:
   `DB has X rows; consider /jessy:cleanup`.
 - Print: `scanned N new; M match; K low; L ignored`.
+  If `cap_hit=true`, print:
+  `scanned N new; M match; K low; L ignored; cap hit`.
 - Print timing:
   `timing discover=Xms card_read=Yms extract=Zms score=Ams db=Bms total=Cms`.
 
