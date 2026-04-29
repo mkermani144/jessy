@@ -1,7 +1,7 @@
 ---
 name: jessy-scan
 description: Scan open LinkedIn job tabs in Chrome, extract unseen jobs, score against preferences in the main thread, and persist results to ~/.jessy/jessy.db. Use when the user runs /jessy:scan or asks jessy to look for new jobs.
-model: claude-sonnet-4-5
+model: sonnet
 effort: low
 user-invocable: false
 allowed-tools:
