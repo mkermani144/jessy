@@ -1,8 +1,8 @@
 # jessy-scan extractor task
 
-Invoke the platform extractor Agent for exactly one job card. Main thread
-handles enumeration, preferences, scoring, and DB writes. The Agent returns
-strict JSON only.
+Legacy extractor task for worker-local use only. Main supervisor must not use
+this directly; `jessy-browser-worker`/`jessy-judge-worker` own payload reads
+and DB writes. Extractor Agents return strict JSON only to the worker.
 
 ## Inputs
 

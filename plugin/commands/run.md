@@ -1,5 +1,5 @@
 ---
-description: Run a full jessy pass — scan open job tabs, then render the report. Requires `claude --chrome`.
+description: Run a full context-isolated jessy pass. Requires `claude --chrome`.
 disable-model-invocation: true
 allowed-tools:
   - Skill(jessy-onboard)
@@ -11,6 +11,8 @@ Run jessy end-to-end.
 
 1. If `~/.jessy/config.yaml` or `~/.jessy/preferences.md` is missing,
    invoke the **jessy-onboard** skill first and wait for it to finish.
-2. Invoke the **jessy-scan** skill. Print its one-line summary.
-3. Then invoke the **jessy-report** skill against current unseen rows.
-4. Stop after report finishes — do not re-scan.
+2. Invoke **jessy-scan**. It supervises ops/browser/judge workers and prints
+   only a one-line scan summary.
+3. Invoke **jessy-report**. It prepares report artifacts outside chat, pauses
+   for the user's choices, then consumes them through the report worker.
+4. Stop after report finishes. Do not re-scan.

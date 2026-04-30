@@ -2,10 +2,9 @@
 
 Claude Code plugin replacing Rust `jessy`. Drives Chrome via `claude --chrome`,
 scans LinkedIn / Wellfound job tabs, scores against user prefs, renders ranked
-report. Scan flow stops each tab/feed at the first Jessy-attempted card, then
-runs the platform Haiku extractor subagent one card at a time for only new
-cards. Extractors do not receive preferences or scoring rubric; the main agent
-scores extracted JSON.
+report. The main agent is a supervisor only: browser, judge, report, ops, and
+learn workers move payloads through SQLite/temp files and return compact
+receipts.
 
 ## Commands
 
@@ -52,7 +51,7 @@ already granted.
 ### Permissions / approval prompts
 
 The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
-list covering helper scripts, scan compound DB helpers, report-session flow,
+list covering helper scripts, stage-bus helpers, scan compound DB helpers, report-session flow,
 Claude-in-Chrome MCP tools, the nested `Skill(jessy-learn)` handoff, and
 `Read` / `Edit` / `Write` scoped to `~/.jessy/`.
 
@@ -68,9 +67,9 @@ for plugin skill/command content, not external settings files. One-time user
 actions still required: allow the Claude-in-Chrome extension on first `/chrome`
 use, and attach the session with `claude --chrome`.
 
-Scan DB work must be invoked as literal `db.sh` / `db_scan.sh` script calls.
-Do not wrap it in `$DB`, shell functions, or shell loops; those change the
-command shape and can trigger approval prompts.
+DB work must be invoked as literal `db.sh` / `db_stage.sh` / `db_scan.sh`
+script calls. Do not wrap it in `$DB`, shell functions, or shell loops; those
+change the command shape and can trigger approval prompts.
 
 ### Optional: bare `/jessy` slash command
 
@@ -129,7 +128,8 @@ After `claude --plugin-dir ...`:
    - `~/.jessy/preferences.md`
    - `~/.jessy/jessy.db`
 3. `sqlite3 ~/.jessy/jessy.db '.schema'` shows `companies`, `jobs`,
-   `job_attempts`, `meta` tables plus related indexes.
+   `job_attempts`, `runs`, `stage_items`, `stage_events`, snapshot tables,
+   `meta`, and related indexes.
 4. `bash plugin/scripts/db.sh meta_get jobs_since_last_learn` prints `0`.
 5. `bash plugin/scripts/db.sh meta_set foo bar && bash plugin/scripts/db.sh meta_get foo`
    prints `bar`.
@@ -189,6 +189,15 @@ After `claude --plugin-dir ...`:
 26. `/jessy:learn` prompts via AskUserQuestion with candidate patterns,
     appends bullets under the right `preferences.md` section on consent.
 
+### Stage bus
+
+27. `bash plugin/tests/check_stage_bus.sh` passes.
+28. `bash plugin/tests/check_context_contracts.sh` passes.
+29. `bash plugin/scripts/db_stage.sh run_create` prints a compact JSON
+    receipt with `run_id`.
+30. Snapshot helpers persist payload text but stdout receipts contain only ids
+    and counts.
+
 ## Layout
 
 ```
@@ -203,7 +212,12 @@ plugin/
     platforms/linkedin/SKILL.md
     platforms/wellfound/SKILL.md
   agents/
+    jessy-browser-worker.md
+    jessy-judge-worker.md
+    jessy-learn-worker.md
     jessy-linkedin-extractor.md
+    jessy-ops-worker.md
+    jessy-report-worker.md
     jessy-wellfound-extractor.md
   commands/
     cleanup.md
@@ -216,6 +230,7 @@ plugin/
   scripts/
     db.sh
     db_scan.sh
+    db_stage.sh
     install_bare_alias.sh
     onboard.sh
     report_session.sh
@@ -225,9 +240,11 @@ plugin/
     config.example.yaml
     preferences.example.md
   tests/
+    check_context_contracts.sh
     check_db_attempts.sh
     check_report_session.sh
     check_render_cards.sh
+    check_stage_bus.sh
   README.md
 ```
 
