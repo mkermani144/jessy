@@ -1,6 +1,6 @@
 ---
 name: jessy-learn
-description: Mine the user's recent open / dismiss decisions, propose lopsided patterns as candidate preference updates, and (with consent) rewrite ~/.jessy/preferences.md. Use when the report skill detects the learn cadence has been hit, or when the user runs /jessy:learn directly.
+description: Internal learning stage. Mine recent open / dismiss decisions, propose preference updates, and edit ~/.jessy/preferences.md with consent.
 model: sonnet
 effort: medium
 user-invocable: false

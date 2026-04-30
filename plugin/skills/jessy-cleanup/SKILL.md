@@ -1,6 +1,6 @@
 ---
 name: jessy-cleanup
-description: Prune old / acted-on rows from ~/.jessy/jessy.db using the limits in config.yaml. Use when the user runs /jessy:cleanup or jessy-scan auto-suggests it because the row count is high.
+description: Internal cleanup stage. Prune old / acted-on rows from ~/.jessy/jessy.db using config.yaml limits.
 user-invocable: false
 allowed-tools:
   - Bash(${CLAUDE_PLUGIN_ROOT}/scripts/db.sh*)

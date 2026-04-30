@@ -10,17 +10,11 @@ receipts.
 
 | Command          | What |
 |------------------|------|
-| `/jessy:run`     | Full pass: scan + report. |
-| `/jessy:scan`    | Scan open LinkedIn / Wellfound tabs, score, persist. Needs `claude --chrome`. |
-| `/jessy:report`  | Open ranked report in tmux/less; pick rows; mark seen. |
-| `/jessy:learn`   | Mine recent open/dismiss patterns; suggest `preferences.md` updates. |
-| `/jessy:cleanup` | Prune old / acted-on rows. Never touches unseen rows. |
+| `/jessy:run`     | Full pass: scan, report, learn/cleanup when due. Needs `claude --chrome`. |
 | `/jessy:config`  | Show path to `~/.jessy/config.yaml`; edit in your own editor. Onboards if missing. |
 | `/jessy:prefs`   | Show path to `~/.jessy/preferences.md`; edit in your own editor. Onboards if missing. |
-| `/jessy:reset`   | Wipe `~/.jessy` and re-onboard from scratch. Destructive — confirms first, no backup. |
 
-`/jessy:learn` also runs automatically from `/jessy:report` when the
-learning cadence is hit (configured in `config.yaml`).
+Learning and cleanup are internal `/jessy:run` stages, not visible commands.
 
 ## Install
 
@@ -43,7 +37,7 @@ Optional shell alias for repeated sessions:
 alias claude-jessy='claude --settings /absolute/path/to/jessy/plugin/.claude/settings.json --plugin-dir /absolute/path/to/jessy/plugin --chrome'
 ```
 
-`--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab read/open
+`--chrome` is needed for `/jessy:run` — tab read/open
 uses the attached Chrome session. On first use, allow the Claude-in-Chrome
 extension for the upcoming job tab actions; normal runs assume that access is
 already granted.
@@ -51,8 +45,8 @@ already granted.
 ### Permissions / approval prompts
 
 The plugin ships `plugin/.claude/settings.json` with a `permissions.allow`
-list covering helper scripts, stage-bus helpers, scan compound DB helpers, report-session flow,
-Claude-in-Chrome MCP tools, the nested `Skill(jessy-learn)` handoff, and
+list covering helper scripts, stage-bus helpers, scan compound DB helpers,
+report-session flow, Claude-in-Chrome MCP tools, internal skill handoffs, and
 `Read` / `Edit` / `Write` scoped to `~/.jessy/`.
 
 Important: `--plugin-dir` loads plugin commands/skills, but does **not** load
@@ -71,19 +65,6 @@ DB work must be invoked as literal `db.sh` / `db_stage.sh` / `db_scan.sh`
 script calls. Do not wrap it in `$DB`, shell functions, or shell loops; those
 change the command shape and can trigger approval prompts.
 
-### Optional: bare `/jessy` slash command
-
-Claude Code namespaces plugin commands as `/<plugin>:<cmd>`, so the canonical
-full-pass command is `/jessy:run`. If you want `/jessy` (bare) to work too,
-install a user-level command once:
-
-```sh
-bash /absolute/path/to/jessy/plugin/scripts/install_bare_alias.sh
-```
-
-Writes `~/.claude/commands/jessy.md` that delegates to the plugin's skills.
-Idempotent; `--force` to overwrite.
-
 ### Marketplace
 
 Not published yet. When it lands, install will be:
@@ -99,7 +80,7 @@ Until then, use `--plugin-dir`.
 
 ## Troubleshooting
 
-- **`/jessy:*` commands missing from `/help`**: run `/reload-plugins`. If
+- **Jessy commands missing from `/help`**: run `/reload-plugins`. If
   still missing, check `claude --plugin-dir` points at the directory
   containing `.claude-plugin/plugin.json` (not at one level above).
 - **`onboard.sh: jq required`** or **`sqlite3 required`**: `brew install jq`
@@ -119,7 +100,7 @@ After `claude --plugin-dir ...`:
 
 ### Round 1
 
-1. `/help` lists `/jessy:config`, `/jessy:prefs`, `/jessy:scan`.
+1. `/help` lists `/jessy:run`, `/jessy:config`, `/jessy:prefs`.
 2. With `~/.jessy/` absent, `/jessy:config` asks the user (via
    AskUserQuestion) for URLs / dealbreakers / likes, runs
    `onboard.sh --non-interactive`, then prints the config path. Files
@@ -154,9 +135,9 @@ After `claude --plugin-dir ...`:
     prints `yes`; `... view/999` prints `no`. `seen` is a backcompat alias.
 14. `bash plugin/scripts/db.sh count` prints the row count.
 15. With `claude --chrome` and a LinkedIn / Wellfound search tab open,
-    `/jessy:scan` walks pages, prints `scanned N new; M match; K low; L ignored`,
-    and rows appear in `jobs` / `job_attempts`. Re-running immediately scans
-    0 new because the first attempted card stops each tab/feed.
+    `/jessy:run` walks pages, prints `scanned N new; M match; K low; L ignored`,
+    then opens the report flow. Re-running immediately scans 0 new because
+    the first attempted card stops each tab/feed.
 
 ### Round 3
 
@@ -169,10 +150,10 @@ After `claude --plugin-dir ...`:
     JSONL, or the full index map into chat.
 19. `bash plugin/scripts/report_session.sh consume none` consumes that
     snapshot and prints `opened 0; dismissed M; unseen 0.`.
-20. `/jessy:report` opens cards in tmux/less when available, prompts for
+20. `/jessy:run` opens cards in tmux/less when available, prompts for
     indices in chat, consumes the snapshot, and prints
     `opened N; dismissed M; unseen 0.`.
-21. `/jessy:run` runs `/jessy:scan` then `/jessy:report` in one shot.
+21. `/jessy:run` is the only scan/report entrypoint.
 
 ### Round 4
 
@@ -180,13 +161,13 @@ After `claude --plugin-dir ...`:
     rows JSONL, newest first.
 23. `bash plugin/scripts/db.sh cleanup 30 5000` prunes old acted-on rows;
     prints `pruned X; now Y rows`. Unseen rows survive regardless of age.
-24. `/jessy:cleanup` runs the skill — same output, reads thresholds from
+24. Cleanup runs internally when configured; thresholds come from
     `~/.jessy/config.yaml`.
-25. After enough acted-on history, `/jessy:report` auto-invokes
-    `/jessy:learn` when `jobs_since_last_learn >= cadence[idx]`.
+25. After enough acted-on history, `/jessy:run` invokes learning when
+    `jobs_since_last_learn >= cadence[idx]`.
     `meta_get jobs_since_last_learn` resets to `0` and
     `next_cadence_idx` advances by 1 (clamps to last).
-26. `/jessy:learn` prompts via AskUserQuestion with candidate patterns,
+26. Learning prompts via AskUserQuestion with candidate patterns,
     appends bullets under the right `preferences.md` section on consent.
 
 ### Stage bus
@@ -220,18 +201,13 @@ plugin/
     jessy-report-worker.md
     jessy-wellfound-extractor.md
   commands/
-    cleanup.md
     config.md
     run.md
-    learn.md
     prefs.md
-    report.md
-    scan.md
   scripts/
     db.sh
     db_scan.sh
     db_stage.sh
-    install_bare_alias.sh
     onboard.sh
     report_session.sh
     render_cards.sh

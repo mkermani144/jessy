@@ -9,7 +9,7 @@ skip_title_keywords: []       # global title prefilter before opening details
 cleanup:
   max_age_days: 30
   max_rows: 5000
-  prompt_when_over: 4000      # suggest /jessy:cleanup when db hits this
+  prompt_when_over: 4000      # trigger internal cleanup prompt when db hits this
 
 learning:
   cadence: [20, 30, 40, 50]   # jobs since last learn → next trigger; last value plateaus

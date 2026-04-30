@@ -133,7 +133,7 @@ cmd_prepare() {
   if [[ -s "$snapshot" ]]; then
     prompt="Review report outside chat, then reply with indices (e.g. 1,3), all, or none."
   else
-    prompt="No unseen jobs; run /jessy:scan first."
+    prompt="No unseen jobs; run /jessy:run first."
   fi
 
   printf 'snapshot=%s\n' "$snapshot"
