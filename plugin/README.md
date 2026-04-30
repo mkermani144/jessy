@@ -49,6 +49,11 @@ list covering helper scripts, stage-bus helpers, scan compound DB helpers,
 report-session flow, Claude-in-Chrome MCP tools, internal skill handoffs, and
 `Read` / `Edit` / `Write` scoped to `~/.jessy/`.
 
+Claude Code's filesystem sandbox is separate from `permissions.allow`. If the
+session sandbox does not list `~/.jessy` as writable, worker agents can read
+config/prefs but cannot write `~/.jessy/jessy.db`. Run `/sandbox`, add
+`~/.jessy` (or the exact DB directory), then restart `/jessy:run`.
+
 Important: `--plugin-dir` loads plugin commands/skills, but does **not** load
 `plugin/.claude/settings.json` as a settings source. Use `--settings
 /absolute/path/to/jessy/plugin/.claude/settings.json`, or merge that file into
@@ -91,6 +96,8 @@ Until then, use `--plugin-dir`.
 - **Scan opens 0 tabs**: confirm `claude --chrome` is attached and a
   LinkedIn or Wellfound list tab is open in that browser; or set
   `platforms.<name>.startup_urls` in config and re-run.
+- **DB not writable / sandbox blocks `~/.jessy`**: run `/sandbox`, add
+  `~/.jessy` or the DB directory to writable paths, then restart the scan.
 - **`db.sh: sqlite3 not on PATH`**: only happens on stripped images;
   `brew install sqlite3`.
 
@@ -112,18 +119,19 @@ After `claude --plugin-dir ...`:
    `job_attempts`, `runs`, `stage_items`, `stage_events`, snapshot tables,
    `meta`, and related indexes.
 4. `bash plugin/scripts/db.sh meta_get jobs_since_last_learn` prints `0`.
-5. `bash plugin/scripts/db.sh meta_set foo bar && bash plugin/scripts/db.sh meta_get foo`
+5. `bash plugin/scripts/db.sh preflight_writable` prints `ok`.
+6. `bash plugin/scripts/db.sh meta_set foo bar && bash plugin/scripts/db.sh meta_get foo`
    prints `bar`.
-6. Re-running `bash plugin/scripts/db.sh init` is a no-op (no errors,
+7. Re-running `bash plugin/scripts/db.sh init` is a no-op (no errors,
    meta values preserved).
-7. Re-running `/jessy:config` skips the onboarding AskUserQuestion
+8. Re-running `/jessy:config` skips the onboarding AskUserQuestion
    prompts and just prints the path.
-8. `bash plugin/scripts/onboard.sh --force` backs up existing files to
+9. `bash plugin/scripts/onboard.sh --force` backs up existing files to
    `~/.jessy/backup-<unix-ts>/` (or `backup-<ts>-<pid>/` on same-second
    collision) and writes fresh templates.
-9. `/jessy:prefs` never spawns an editor; it prints the path and
+10. `/jessy:prefs` never spawns an editor; it prints the path and
    delegates editing to the user.
-10. `bash plugin/scripts/db.sh bogus` exits 2 with usage on stderr.
+11. `bash plugin/scripts/db.sh bogus` exits 2 with usage on stderr.
 
 ### Round 2
 

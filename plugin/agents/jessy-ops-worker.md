@@ -31,12 +31,14 @@ Prepare flow:
 
 1. Determine `db_path` from the invoking prompt if supplied, otherwise
    `${JESSY_DB:-$HOME/.jessy/jessy.db}`.
-2. Run `db.sh --db <db_path> init`.
-3. Read only small config flags and file existence.
-4. Create a run and initial browser queue item with
+2. Run `db.sh --db <db_path> preflight_writable`.
+3. If preflight fails, do not create a run or claim work. Return:
+   `{"agent":"jessy-ops-worker","status":"failed","reason":"db_not_writable","db_path":"...","prompt":"Run /sandbox and add the DB directory to writable paths, then retry."}`.
+4. Read only small config flags and file existence.
+5. Create a run and initial browser queue item with
    `db_stage.sh --db <db_path> prepare_run`.
-5. Browser workers enqueue judge refs after detail snapshots exist.
-6. Return `{run_id,status,next,db_path}`.
+6. Browser workers enqueue judge refs after detail snapshots exist.
+7. Return `{run_id,status,next,db_path}`.
 
 Use explicit `--db <db_path>` for every DB helper call. Do not rely on
 environment inheritance across subagents.

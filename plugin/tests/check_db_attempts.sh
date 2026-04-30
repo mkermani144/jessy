@@ -12,6 +12,7 @@ trap 'rm -f "$TMP_DB"' EXIT
 export JESSY_DB="$TMP_DB"
 
 "$DB" init
+[[ "$("$DB" preflight_writable)" == "ok" ]]
 
 [[ "$("$DB" attempted https://www.linkedin.com/jobs/view/1)" == "no" ]]
 [[ "$("$DB" attempt_start https://www.linkedin.com/jobs/view/1 linkedin)" == "inserted" ]]

@@ -28,6 +28,8 @@ cards, extracted JSON, snapshot rows, or script row dumps.
 1. Invoke `jessy-ops-worker` to initialize DB, read small config flags, create
    a `runs` row, and enqueue browser work. It returns
    `{run_id,next,status,db_path}`.
+   If it returns `reason:"db_not_writable"`, stop immediately and print its
+   prompt. Do not invoke browser or judge workers.
 2. Loop `jessy-browser-worker` serially until its receipt says `done:true`.
    Browser worker owns Chrome, history/title prefilter, `page_snapshots`,
    `job_seeds`, `detail_snapshots`, and browser-stage item status.

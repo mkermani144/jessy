@@ -15,6 +15,7 @@ usage: db.sh [--db <path>] <subcommand> [args...]
 
 subcommands:
   init                              create DB and apply schema (idempotent)
+  preflight_writable                verify DB path can be initialized/written
   meta_get <key>                    print meta value (empty if absent; exit 0)
   meta_set <key> <val>              upsert meta value
   attempted <url>                   print "yes" or "no" if URL was attempted
@@ -74,6 +75,18 @@ ensure_db_ready() {
   local has_meta
   has_meta="$(db "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta' LIMIT 1;")"
   [[ "$has_meta" == "1" ]] || cmd_init
+}
+
+cmd_preflight_writable() {
+  cmd_init
+  db <<'SQL'
+BEGIN IMMEDIATE;
+INSERT INTO meta(key, value) VALUES('__jessy_write_probe', 'ok')
+ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+DELETE FROM meta WHERE key = '__jessy_write_probe';
+COMMIT;
+SQL
+  printf 'ok\n'
 }
 
 cmd_meta_get() {
@@ -447,11 +460,12 @@ main() {
   shift
   # Keep old installs migrated when new subcommands hit existing DBs.
   case "$sub" in
-    init|config_cadence|-h|--help|help) ;;
+    init|preflight_writable|config_cadence|-h|--help|help) ;;
     *) ensure_db_ready ;;
   esac
   case "$sub" in
     init)            cmd_init "$@" ;;
+    preflight_writable) cmd_preflight_writable "$@" ;;
     meta_get)        cmd_meta_get "$@" ;;
     meta_set)        cmd_meta_set "$@" ;;
     attempted)       cmd_attempted "$@" ;;
