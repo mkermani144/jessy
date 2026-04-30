@@ -19,6 +19,7 @@ subcommands:
   event <run_id> <stage> <info|warn|error> <message> [meta_json]
   enqueue <run_id> <stage> [input_ref] [result_meta_json]
   claim <run_id> <stage> [claim_id]
+  claim_batch <run_id> <stage> [limit] [claim_id]
   finish <item_id> <done|failed|skipped> [result_meta_json]
   fail <item_id> <error>
   page_snapshot <run_id> <platform> <tab_url> <fingerprint> <snapshot_ref> [snapshot_text]
@@ -28,6 +29,7 @@ subcommands:
                   <snapshot_ref> [error] [snapshot_text]
   queue_detail <run_id> <seed_id> <canonical_url> <fetch_status> \
                <snapshot_ref> [error] [snapshot_text]
+  detail_context <detail_snapshot_id> [text_cap]
   summary <run_id>
 EOF
   exit 2
@@ -190,6 +192,46 @@ COMMIT;
 SQL
 }
 
+cmd_claim_batch() {
+  init_db
+  local run_id="${1:-}" stage="${2:-}" limit="${3:-5}" claim_id="${4:-}"
+  require_int run_id "$run_id"
+  require_int limit "$limit"
+  [[ -n "$stage" ]] || usage
+  [[ -n "$claim_id" ]] || claim_id="claim-$(date +%s)-$$"
+  db <<SQL
+BEGIN IMMEDIATE;
+CREATE TEMP TABLE claim_target(id INTEGER PRIMARY KEY);
+INSERT INTO claim_target(id)
+SELECT id FROM stage_items
+WHERE run_id = $run_id AND stage = $(sql_quote "$stage") AND status = 'pending'
+ORDER BY id
+LIMIT $limit;
+UPDATE stage_items
+SET status = 'claimed',
+    claim_id = $(sql_quote "$claim_id"),
+    attempts = attempts + 1,
+    updated_ts = CAST(strftime('%s','now') AS INTEGER)
+WHERE id IN (SELECT id FROM claim_target);
+SELECT json_object(
+  'status','ok',
+  'run_id',$run_id,
+  'stage',$(sql_quote "$stage"),
+  'claimed',(SELECT COUNT(*) FROM claim_target),
+  'done',json(CASE WHEN (SELECT COUNT(*) FROM claim_target) = 0 THEN 'true' ELSE 'false' END),
+  'items',COALESCE((
+    SELECT json_group_array(json_object(
+      'item_id', s.id,
+      'input_ref', s.input_ref
+    ))
+    FROM stage_items s
+    WHERE s.id IN (SELECT id FROM claim_target)
+  ), json('[]'))
+);
+COMMIT;
+SQL
+}
+
 cmd_finish() {
   init_db
   local item_id="${1:-}" status="${2:-}" result_meta="${3:-}"
@@ -319,6 +361,35 @@ COMMIT;
 SQL
 }
 
+cmd_detail_context() {
+  init_db
+  local detail_id="${1:-}" text_cap="${2:-12000}"
+  require_int detail_snapshot_id "$detail_id"
+  require_int text_cap "$text_cap"
+  db <<SQL
+SELECT json_object(
+  'status','ok',
+  'detail_snapshot_id',d.id,
+  'run_id',d.run_id,
+  'seed_id',d.seed_id,
+  'canonical_url',d.canonical_url,
+  'fetch_status',d.fetch_status,
+  'snapshot_ref',COALESCE(d.snapshot_ref, ''),
+  'snapshot_text',substr(COALESCE(d.snapshot_text, ''), 1, $text_cap),
+  'snapshot_truncated',json(CASE WHEN length(COALESCE(d.snapshot_text, '')) > $text_cap THEN 'true' ELSE 'false' END),
+  'error',COALESCE(d.error, ''),
+  'platform',s.platform,
+  'title',COALESCE(s.title, ''),
+  'company',COALESCE(s.company, ''),
+  'location',COALESCE(s.location, ''),
+  'snippet',COALESCE(s.snippet, '')
+)
+FROM detail_snapshots d
+JOIN job_seeds s ON s.id = d.seed_id
+WHERE d.id = $detail_id;
+SQL
+}
+
 cmd_summary() {
   init_db
   local run_id="${1:-}"
@@ -350,12 +421,14 @@ main() {
     event)           cmd_event "$@" ;;
     enqueue)         cmd_enqueue "$@" ;;
     claim)           cmd_claim "$@" ;;
+    claim_batch)     cmd_claim_batch "$@" ;;
     finish)          cmd_finish "$@" ;;
     fail)            cmd_fail "$@" ;;
     page_snapshot)   cmd_page_snapshot "$@" ;;
     job_seed)        cmd_job_seed "$@" ;;
     detail_snapshot) cmd_detail_snapshot "$@" ;;
     queue_detail)    cmd_queue_detail "$@" ;;
+    detail_context)  cmd_detail_context "$@" ;;
     summary)         cmd_summary "$@" ;;
     -h|--help|help)  usage ;;
     *)               echo "db_stage.sh: unknown subcommand: $sub" >&2; usage ;;

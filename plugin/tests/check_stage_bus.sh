@@ -54,6 +54,14 @@ grep -q '"judge_item_id":' <<<"$queued_receipt"
 judge_ref="$(sqlite3 "$TMP_DB" "SELECT input_ref FROM stage_items WHERE run_id = $run_id AND stage = 'judge';")"
 [[ "$judge_ref" == "detail_snapshot:2" ]]
 
+judge_claim="$("$STAGE" claim_batch "$run_id" judge 5 judge-a)"
+grep -q '"claimed":1' <<<"$judge_claim"
+grep -q '"input_ref":"detail_snapshot:2"' <<<"$judge_claim"
+context="$("$STAGE" detail_context 2 20)"
+grep -q '"snapshot_text":"Visible job detail t"' <<<"$context"
+grep -q '"snapshot_truncated":true' <<<"$context"
+grep -q '"title":"Engineer"' <<<"$context"
+
 empty_claim="$("$STAGE" claim "$run_id" browser worker-b)"
 grep -q '"claimed":0' <<<"$empty_claim"
 grep -q '"done":true' <<<"$empty_claim"
