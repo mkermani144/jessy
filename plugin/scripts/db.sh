@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="$SCRIPT_DIR/schema.sql"
+source "$SCRIPT_DIR/sqlite_common.sh"
 
 : "${JESSY_DB:=$HOME/.jessy/jessy.db}"
 
@@ -50,39 +51,39 @@ EOF
   exit 2
 }
 
-require_sqlite() {
-  command -v sqlite3 >/dev/null 2>&1 || {
-    echo "db.sh: sqlite3 not on PATH (try: brew install sqlite3)" >&2
-    exit 3
-  }
+cmd_init() {
+  sqlite_init_db "$JESSY_DB" "$SCHEMA"
 }
 
-cmd_init() {
-  require_sqlite
-  mkdir -p "$(dirname "$JESSY_DB")"
-  sqlite3 -bail -batch "$JESSY_DB" < "$SCHEMA"
+db() {
+  sqlite_open "$JESSY_DB" "$@"
+}
+
+ensure_db_ready() {
+  [[ -e "$JESSY_DB" ]] || { cmd_init; return; }
+  local has_meta
+  has_meta="$(db "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta' LIMIT 1;")"
+  [[ "$has_meta" == "1" ]] || cmd_init
 }
 
 cmd_meta_get() {
   # Print the value (or empty if missing). Always exit 0 — makes callers
   # set -e safe without needing `|| true` guards.
-  require_sqlite
   local key="${1:-}"
   [[ -n "$key" ]] || { echo "db.sh: meta_get requires <key>" >&2; exit 2; }
   local k
   k=$(printf '%s' "$key" | sed "s/'/''/g")
-  sqlite3 -bail -batch "$JESSY_DB" \
+  db \
     "SELECT value FROM meta WHERE key = '$k';"
 }
 
 cmd_meta_set() {
-  require_sqlite
   local key="${1:-}" val="${2:-}"
   [[ -n "$key" ]] || { echo "db.sh: meta_set requires <key> <value>" >&2; exit 2; }
   local k v
   k=$(printf '%s' "$key" | sed "s/'/''/g")
   v=$(printf '%s' "$val" | sed "s/'/''/g")
-  sqlite3 -bail -batch "$JESSY_DB" \
+  db \
     "INSERT INTO meta(key, value) VALUES('$k', '$v')
      ON CONFLICT(key) DO UPDATE SET value=excluded.value;"
 }
@@ -93,11 +94,10 @@ sql_quote() {
 }
 
 cmd_seen() {
-  require_sqlite
   local url="${1:-}"
   [[ -n "$url" ]] || { echo "db.sh: seen requires <url>" >&2; exit 2; }
   local out
-  out=$(sqlite3 -bail -batch "$JESSY_DB" \
+  out=$(db \
     "SELECT 1
      WHERE EXISTS (SELECT 1 FROM job_attempts WHERE url = $(sql_quote "$url"))
         OR EXISTS (SELECT 1 FROM jobs WHERE url = $(sql_quote "$url"))
@@ -116,12 +116,11 @@ cmd_attempted() {
 }
 
 cmd_attempt_start() {
-  require_sqlite
   local url="${1:-}" platform="${2:-linkedin}"
   [[ -n "$url" ]] || { echo "db.sh: attempt_start requires <url> [platform]" >&2; exit 2; }
   local before after
-  before=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM job_attempts;")
-  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+  before=$(db "SELECT COUNT(*) FROM job_attempts;")
+  db <<SQL
 INSERT OR IGNORE INTO job_attempts(url, platform, status, started_ts)
 VALUES(
   $(sql_quote "$url"),
@@ -130,7 +129,7 @@ VALUES(
   CAST(strftime('%s','now') AS INTEGER)
 );
 SQL
-  after=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM job_attempts;")
+  after=$(db "SELECT COUNT(*) FROM job_attempts;")
   if [[ "$after" -gt "$before" ]]; then
     echo inserted
   else
@@ -139,7 +138,6 @@ SQL
 }
 
 cmd_attempt_finish() {
-  require_sqlite
   local url="${1:-}" status="${2:-}" extraction_json="${3:-}" score="${4:-}" rationale="${5:-}"
   [[ -n "$url" && -n "$status" ]] || {
     echo "db.sh: attempt_finish requires <url> <status> [extraction_json] [score] [rationale]" >&2
@@ -155,7 +153,7 @@ cmd_attempt_finish() {
   fi
   local score_sql="NULL"
   [[ -n "$score" ]] && score_sql="$score"
-  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+  db <<SQL
 INSERT INTO job_attempts(
   url, platform, status, started_ts, finished_ts, error,
   extraction_json, score, rationale
@@ -182,10 +180,9 @@ SQL
 }
 
 cmd_upsert_company() {
-  require_sqlite
   local name="${1:-}" size="${2:-}" summary="${3:-}"
   [[ -n "$name" ]] || { echo "db.sh: upsert_company requires <name>" >&2; exit 2; }
-  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+  db <<SQL
 INSERT INTO companies(name, size, summary)
 VALUES($(sql_quote "$name"), $(sql_quote "$size"), $(sql_quote "$summary"))
 ON CONFLICT(name) DO UPDATE SET
@@ -196,7 +193,6 @@ SQL
 }
 
 cmd_insert_job() {
-  require_sqlite
   if [[ $# -lt 9 ]]; then
     echo "db.sh: insert_job needs 9 args (url company_id title desc req_hard req_nice platform score rationale)" >&2
     exit 2
@@ -207,8 +203,8 @@ cmd_insert_job() {
   [[ "$company_id" =~ ^[0-9]+$ ]] || { echo "db.sh: company_id must be int" >&2; exit 2; }
   [[ "$score" =~ ^-?[0-9]+$ ]] || { echo "db.sh: score must be int" >&2; exit 2; }
   local before after
-  before=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;")
-  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+  before=$(db "SELECT COUNT(*) FROM jobs;")
+  db <<SQL
 INSERT OR IGNORE INTO jobs(url, company_id, title, desc, req_hard, req_nice, platform, score, rationale, ts)
 VALUES(
   $(sql_quote "$url"),
@@ -238,7 +234,7 @@ ON CONFLICT(url) DO UPDATE SET
   score = excluded.score,
   rationale = excluded.rationale;
 SQL
-  after=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;")
+  after=$(db "SELECT COUNT(*) FROM jobs;")
   if [[ "$after" -gt "$before" ]]; then
     echo inserted
   else
@@ -247,12 +243,10 @@ SQL
 }
 
 cmd_count() {
-  require_sqlite
-  sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;"
+  db "SELECT COUNT(*) FROM jobs;"
 }
 
 cmd_query_report() {
-  require_sqlite
   local scope="${1:-unseen}"
   local where
   case "$scope" in
@@ -260,7 +254,7 @@ cmd_query_report() {
     all)    where="" ;;
     *) echo "db.sh: query_report scope must be unseen|all" >&2; exit 2 ;;
   esac
-  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+  db <<SQL
 .mode list
 .separator "\n"
 SELECT json_object(
@@ -299,8 +293,6 @@ cmd_consume_report() {
   # Consume exactly the report snapshot passed on stdin. Picked URLs are args;
   # every other URL from the snapshot is dismissed. This keeps report handling
   # deterministic even if later scans add more unseen jobs.
-  require_sqlite
-
   local sql line url
   sql=$(
     cat <<'SQL'
@@ -345,14 +337,13 @@ SELECT printf(
 SQL
 )
 
-  sqlite3 -bail -batch "$JESSY_DB" <<<"$sql"
+  db <<<"$sql"
 }
 
 cmd_recent_actions() {
-  require_sqlite
   local limit="${1:-50}"
   [[ "$limit" =~ ^[0-9]+$ ]] || { echo "db.sh: limit must be int" >&2; exit 2; }
-  sqlite3 -bail -batch "$JESSY_DB" <<SQL
+  db <<SQL
 .mode list
 .separator "\n"
 SELECT json_object(
@@ -379,25 +370,24 @@ SQL
 }
 
 cmd_cleanup() {
-  require_sqlite
   local max_age="${1:-}" max_rows="${2:-}"
   [[ "$max_age"  =~ ^[0-9]+$ ]] || { echo "db.sh: max_age_days must be int" >&2; exit 2; }
   [[ "$max_rows" =~ ^[0-9]+$ ]] || { echo "db.sh: max_rows must be int" >&2; exit 2; }
   local cutoff before after
   cutoff=$(( $(date +%s) - max_age * 86400 ))
-  before=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;")
+  before=$(db "SELECT COUNT(*) FROM jobs;")
 
   # 1. Age-based prune (acted-on only)
-  sqlite3 -bail -batch "$JESSY_DB" \
+  db \
     "DELETE FROM jobs WHERE user_action IS NOT NULL AND ts < $cutoff;"
 
   # 2. Row-cap prune — compute extra in shell to avoid SQLite LIMIT
   #    gotchas (negative LIMIT = unlimited; MAX() aggregate ambiguity).
   local now_rows extra
-  now_rows=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;")
+  now_rows=$(db "SELECT COUNT(*) FROM jobs;")
   extra=$(( now_rows - max_rows ))
   if [[ $extra -gt 0 ]]; then
-    sqlite3 -bail -batch "$JESSY_DB" <<SQL
+    db <<SQL
 DELETE FROM jobs WHERE url IN (
   SELECT url FROM jobs
   WHERE user_action IS NOT NULL
@@ -408,11 +398,11 @@ SQL
   fi
 
   # 3. Orphan companies (keep only ones referenced by remaining jobs)
-  sqlite3 -bail -batch "$JESSY_DB" \
+  db \
     "DELETE FROM companies
      WHERE id NOT IN (SELECT DISTINCT company_id FROM jobs WHERE company_id IS NOT NULL);"
 
-  after=$(sqlite3 -bail -batch "$JESSY_DB" "SELECT COUNT(*) FROM jobs;")
+  after=$(db "SELECT COUNT(*) FROM jobs;")
   printf 'pruned %d; now %d rows\n' "$((before - after))" "$after"
 }
 
@@ -446,7 +436,7 @@ main() {
   # Keep old installs migrated when new subcommands hit existing DBs.
   case "$sub" in
     init|config_cadence|-h|--help|help) ;;
-    *) cmd_init ;;
+    *) ensure_db_ready ;;
   esac
   case "$sub" in
     init)            cmd_init "$@" ;;

@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DB_SH="$SCRIPT_DIR/db.sh"
+source "$SCRIPT_DIR/sqlite_common.sh"
 
 : "${JESSY_DB:=$HOME/.jessy/jessy.db}"
 
@@ -35,15 +36,14 @@ EOF
   exit 2
 }
 
-require_sqlite() {
-  command -v sqlite3 >/dev/null 2>&1 || {
-    echo "db_stage.sh: sqlite3 not on PATH" >&2
-    exit 3
-  }
-}
-
 init_db() {
-  "$DB_SH" init >/dev/null
+  if [[ ! -e "$JESSY_DB" ]]; then
+    "$DB_SH" init >/dev/null
+    return
+  fi
+  local has_stage
+  has_stage="$(sqlite_open "$JESSY_DB" "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stage_items' LIMIT 1;")"
+  [[ "$has_stage" == "1" ]] || "$DB_SH" init >/dev/null
 }
 
 sql_quote() {
@@ -65,8 +65,7 @@ require_status() {
 }
 
 db() {
-  require_sqlite
-  sqlite3 -cmd 'PRAGMA busy_timeout=5000;' -bail -batch "$JESSY_DB"
+  sqlite_open "$JESSY_DB" "$@"
 }
 
 cmd_run_create() {

@@ -177,9 +177,10 @@ After `claude --plugin-dir ...`:
 29. `bash plugin/tests/check_compact_stdout.sh` passes.
 30. `bash plugin/tests/check_history_boundary_smoke.sh` passes.
 31. `bash plugin/tests/check_parallel_claims.sh` passes.
-32. `bash plugin/scripts/db_stage.sh run_create` prints a compact JSON
+32. `bash plugin/tests/check_sqlite_writable.sh` passes.
+33. `bash plugin/scripts/db_stage.sh run_create` prints a compact JSON
     receipt with `run_id`.
-33. Snapshot helpers persist payload text but stdout receipts contain only ids
+34. Snapshot helpers persist payload text but stdout receipts contain only ids
     and counts.
 
 ## Layout
@@ -226,6 +227,7 @@ plugin/
     check_parallel_claims.sh
     check_report_session.sh
     check_render_cards.sh
+    check_sqlite_writable.sh
     check_stage_bus.sh
   README.md
 ```
