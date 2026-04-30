@@ -1,6 +1,6 @@
 ---
 name: jessy-scan
-description: Scan open LinkedIn job tabs in Chrome, extract unseen jobs, score against preferences in the main thread, and persist results to ~/.jessy/jessy.db. Use when the user runs /jessy:scan or asks jessy to look for new jobs.
+description: Scan open job tabs in Chrome, extract unseen jobs, score against preferences in the main thread, and persist results to ~/.jessy/jessy.db. Supports LinkedIn and Wellfound. Use when the user runs /jessy:scan or asks jessy to look for new jobs.
 model: sonnet
 effort: low
 user-invocable: false
@@ -17,18 +17,18 @@ allowed-tools:
 
 # jessy-scan
 
-Normal scan is bounded by Jessy history, not by LinkedIn viewed labels.
-Walk each LinkedIn tab/feed top-down. At the first Jessy-attempted card in
+Normal scan is bounded by Jessy history, not by platform viewed labels.
+Walk each supported tab/feed top-down. At the first Jessy-attempted card in
 that tab/feed, stop lower/older cards and move to the next tab/feed.
 
-Use the custom `jessy-linkedin-extractor` Agent for extraction. It runs on
-Haiku with a narrow extraction-only prompt. Extractors receive one URL/card,
-no preferences, no rubric, no fit judgment. Run them serialized, one at a
-time. Main thread owns matching, scoring, DB writes, learning counters, and
-summary output.
+Use the platform extractor Agent for extraction. It runs on Haiku with a
+narrow extraction-only prompt. Extractors receive one URL/card, no
+preferences, no rubric, no fit judgment. Run them serialized, one at a time.
+Main thread owns matching, scoring, DB writes, learning counters, and summary
+output.
 
 Runs against a live Chrome session via `claude --chrome`. Page semantics
-live in `skills/platforms/linkedin/SKILL.md`. Per-card Agent input prompt:
+live in `skills/platforms/<platform>/SKILL.md`. Per-card Agent input prompt:
 `card-task.md`.
 
 ## Preconditions
@@ -36,9 +36,9 @@ live in `skills/platforms/linkedin/SKILL.md`. Per-card Agent input prompt:
 1. `~/.jessy/config.yaml` exists. If missing, run
    `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh`, then continue.
 2. Chrome session is attached (`claude --chrome`).
-3. User is signed into LinkedIn in that Chrome profile.
+3. User is signed into platforms that require auth in that Chrome profile.
 4. On first Chrome-extension prompt, tell the user to allow the upcoming
-   LinkedIn tab reads. Do not ask again unless Chrome prompts again.
+   job tab reads. Do not ask again unless Chrome prompts again.
 
 ## Inputs
 
@@ -48,15 +48,23 @@ Read once at start:
 - `~/.jessy/config.yaml`:
   - `threshold_match`
   - `threshold_low_show`
-  - `linkedin.max_pages`
-  - `linkedin.max_new_per_run` (default 20 if missing)
-  - `linkedin.skip_title_keywords`
-  - `linkedin.startup_urls`
+  - `skip_title_keywords`
+  - `platforms.<name>.enabled`
+  - `platforms.<name>.startup_urls`
+  - `platforms.linkedin.max_pages`
+  - `platforms.<name>.max_new_per_run` (default 20 if missing)
   - `cleanup.prompt_when_over`
 - `~/.jessy/preferences.md`: full main-thread preference context.
   Extract bullets under `## Dealbreakers`, `## Dislikes`, `## Likes`.
 - `${CLAUDE_PLUGIN_ROOT}/skills/jessy-scan/card-task.md`: per-card input
-  contract to send to the `jessy-linkedin-extractor` Agent.
+  contract to send to the platform extractor Agent.
+
+Supported platforms:
+
+| Platform  | List URLs                                  | Canonical URL                         | Extractor                    |
+|-----------|--------------------------------------------|---------------------------------------|------------------------------|
+| linkedin  | `linkedin.com/jobs/...`                    | `https://www.linkedin.com/jobs/view/<id>` | `jessy-linkedin-extractor`   |
+| wellfound | `wellfound.com/jobs`, `/role`, `/location`, `/remote` | `https://wellfound.com/jobs/<id>-<slug>` | `jessy-wellfound-extractor` |
 
 Maintain timers: `discover_ms`, `card_read_ms`, `db_ms`, `extract_ms`,
 `score_ms`, `total_ms`.
@@ -85,13 +93,16 @@ For direct skips and scored rows, use `db_scan.sh` compound commands below.
 
 ### 1. Discover scan tabs
 
-List Chrome tabs. Keep LinkedIn jobs search / collection tabs per the
-linkedin platform skill.
+List Chrome tabs. Keep supported job list tabs per platform skills:
 
-If no LinkedIn scan tabs are open and `linkedin.startup_urls` is non-empty,
-open each startup URL in a new tab and treat those as scan tabs.
+- LinkedIn jobs search / collection tabs.
+- Wellfound jobs / role / location / remote listing tabs.
 
-If still none, print `no LinkedIn job tabs to scan` and stop.
+If no tabs are open for an enabled platform and that platform has
+`startup_urls`, open each startup URL in a new tab and treat those as scan
+tabs.
+
+If still none, print `no job tabs to scan` and stop.
 
 ### 2. Walk each scan tab
 
@@ -101,8 +112,12 @@ For each tab while `stop_scan=false`:
 - `pages_walked = 0`
 - `stop_this_tab = false`
 
-While `pages_walked < linkedin.max_pages`, `stop_this_tab=false`, and
-`stop_scan=false`:
+For LinkedIn, walk while `pages_walked < platforms.linkedin.max_pages`,
+`stop_this_tab=false`, and `stop_scan=false`.
+
+For Wellfound, treat the currently materialized list as the page. Scroll /
+load more until no new visible job rows appear, the first attempted row is
+hit, or `max_new_per_run` is reached.
 
 1. Scroll the job-card list to the bottom to materialize cards.
 2. Read visible cards in list order:
@@ -115,37 +130,39 @@ While `pages_walked < linkedin.max_pages`, `stop_this_tab=false`, and
 3. Same-list stop: if first 3 canonical URLs equal `prev_first_urls`, stop
    this tab. Otherwise set `prev_first_urls` to the current first 3.
 4. For each visible card, in order while `stop_scan=false`:
-   - Canonicalize to `https://www.linkedin.com/jobs/view/<id>`; strip query
-     params and keep only the ID.
+   - Canonicalize using the active platform skill.
+     - LinkedIn: `https://www.linkedin.com/jobs/view/<id>`.
+     - Wellfound: `https://wellfound.com/jobs/<id>-<slug>`, query/fragment stripped.
    - Attempt boundary: call
      `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempted <canonical_url>` on
      cache miss. If `yes`, set `stop_this_tab=true` and stop lower/older
      cards in this tab/feed. Continue the next tab/feed.
      If checking several visible card URLs at once, use:
      `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh attempted_many <url...>`
-   - Ignore LinkedIn `viewed`; it is not a boundary.
+   - Ignore platform viewed/saved/applied UI state; it is not a boundary.
    - Scan cap: after confirming the card is unattempted, if
-     `new >= linkedin.max_new_per_run`, set `cap_hit=true`,
+     `new >= platform.max_new_per_run`, set `cap_hit=true`,
      `stop_scan=true`, and stop all remaining cards/tabs without writing an
      attempt for this card.
      After any later increment of `new`, if
-     `new >= linkedin.max_new_per_run`, set `cap_hit=true` and
+     `new >= platform.max_new_per_run`, set `cap_hit=true` and
      `stop_scan=true` after finishing the current card write.
-   - Title skip keywords: if title matches any
-     `linkedin.skip_title_keywords`, persist with:
-     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job <url> <company> <title> <snippet> 0 "skip title: <keyword>"`
+   - Title skip keywords: if title matches any global
+     `skip_title_keywords` value, persist with:
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job <platform> <url> <company> <title> <snippet> 0 "skip title: <keyword>"`
      Count new and ignored, cache attempted `yes`, then honor `stop_scan` or
      continue.
    - Title-only dealbreaker: if a dealbreaker bullet matches the title,
-     persist with `db_scan.sh skip_job` and rationale
+     persist with `db_scan.sh skip_job <platform> ...` and rationale
      `dealbreaker (title): <bullet>`. Count new and ignored, cache attempted
      `yes`, then honor `stop_scan` or continue.
    - Otherwise persist attempt start:
-     `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> linkedin`
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> <platform>`
      Count new and cache attempted `yes`.
-   - Use the Agent tool with subagent type `jessy-linkedin-extractor`. Do not
-     dispatch another extractor until this one returns.
+   - Use the Agent tool with the platform extractor subagent. Do not dispatch
+     another extractor until this one returns.
    - Extractor input:
+     - platform
      - canonical URL
      - card title
      - card company
@@ -162,15 +179,16 @@ While `pages_walked < linkedin.max_pages`, `stop_this_tab=false`, and
        Failed rows count as attempted and future scan boundary.
    - Score in the main thread from extractor JSON + preferences only.
    - Insert the scored row with one call:
-     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job <url> <company> <company_size> <title> <desc> <req_json> <nice_json> <score> <rationale> <extract_json>`
+     `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job <platform> <url> <company> <company_size> <title> <desc> <req_json> <nice_json> <score> <rationale> <extract_json>`
    - Tally:
      - `new`: every newly attempted unattempted card, including skipped,
        failed, partial, and scored cards
      - `match`: score >= `threshold_match`
      - `low`: score in `[threshold_low_show, threshold_match)`
      - `ignored`: score < `threshold_low_show` or failed/skip attempt
-5. If not stopped, click next-page or continue infinite scroll. Increment
-   `pages_walked`.
+5. If LinkedIn and not stopped, click next-page or continue infinite scroll.
+   Increment `pages_walked`. If Wellfound and not stopped, continue loading
+   visible rows until the list stops changing.
 
 ### 3. Main Scoring
 
@@ -260,12 +278,12 @@ Use:
 - `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempted <url>` for boundary checks.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh attempted_many <url...>` for
   batch boundary checks without shell loops.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> linkedin` before
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh attempt_start <url> <platform>` before
   extraction.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job ...` for title skips.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job ...` for scored rows.
-- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh fail_attempt ...` for failed
-  extraction.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh skip_job <platform> ...` for title skips.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh score_job <platform> ...` for scored rows.
+- `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh fail_attempt <platform> ...` for
+  failed extraction.
 - `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh bump_learn <new>` after
   all tabs.
 
@@ -293,4 +311,4 @@ card data to create a useful ignored row. Always finish the attempt as
 - No preferences or scoring rubric in extractor prompts.
 - No company-page browsing.
 - No extra tabs during extraction.
-- No LinkedIn `viewed` boundary logic.
+- No platform viewed/saved/applied boundary logic.

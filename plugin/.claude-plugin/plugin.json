@@ -1,11 +1,11 @@
 {
   "name": "jessy",
   "version": "0.1.0",
-  "description": "Local read-only LinkedIn job scanner with learning prefs",
+  "description": "Local read-only job scanner with learning prefs",
   "author": {
     "name": "Mohammad Kermani",
     "email": "mkermani144@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["jobs", "linkedin", "scanner"]
+  "keywords": ["jobs", "linkedin", "wellfound", "scanner"]
 }

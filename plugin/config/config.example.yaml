@@ -4,6 +4,7 @@
 
 threshold_match: 70           # score >= → match
 threshold_low_show: 30        # score >= → compact list entry; below → "+N ignored"
+skip_title_keywords: []       # global title prefilter before opening details
 
 cleanup:
   max_age_days: 30
@@ -13,8 +14,14 @@ cleanup:
 learning:
   cadence: [20, 30, 40, 50]   # jobs since last learn → next trigger; last value plateaus
 
-linkedin:
-  startup_urls: []            # filled during onboarding; add LinkedIn search URLs here
-  max_pages: 2                # tuned conservative for token cost
-  max_new_per_run: 20         # stop after this many newly attempted cards
-  skip_title_keywords: []     # optional title prefilter (cheap skip before open)
+platforms:
+  linkedin:
+    enabled: true
+    startup_urls: []          # filled during onboarding; add LinkedIn search URLs here
+    max_pages: 2              # tuned conservative for token cost
+    max_new_per_run: 20       # stop after this many newly attempted cards
+
+  wellfound:
+    enabled: true
+    startup_urls: []          # add Wellfound /jobs, /role/*, /location/* URLs here
+    max_new_per_run: 20

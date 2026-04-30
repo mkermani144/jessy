@@ -1,6 +1,6 @@
 ---
 name: jessy-onboard
-description: First-run setup for jessy — ask the user for LinkedIn search URLs, dealbreakers, and likes via AskUserQuestion, then write ~/.jessy/{config.yaml, preferences.md, jessy.db}. Invoked by every jessy command when ~/.jessy is missing or incomplete.
+description: First-run setup for jessy — ask the user for job search URLs, dealbreakers, and likes via AskUserQuestion, then write ~/.jessy/{config.yaml, preferences.md, jessy.db}. Invoked by every jessy command when ~/.jessy is missing or incomplete.
 user-invocable: false
 allowed-tools:
   - Bash(test *)
@@ -31,8 +31,9 @@ One question at a time, free-text answers. For each, the user can leave
 the answer blank to skip.
 
 1. `LinkedIn search URLs you want jessy to scan? (one per line, or blank to skip)`
-2. `Dealbreakers — jobs matching these auto-score 0 (one per line, or blank)`
-3. `Likes — jobs matching these get a score boost (one per line, or blank)`
+2. `Wellfound search URLs you want jessy to scan? (one per line, or blank to skip)`
+3. `Dealbreakers — jobs matching these auto-score 0 (one per line, or blank)`
+4. `Likes — jobs matching these get a score boost (one per line, or blank)`
 
 Collect each answer as a multi-line string.
 
@@ -51,6 +52,7 @@ If the answer was blank, pass `/dev/null` instead of a temp file path
 ${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh \
   --non-interactive \
   --urls-file "<urls_file_or_/dev/null>" \
+  --wellfound-urls-file "<wellfound_urls_file_or_/dev/null>" \
   --dealbreakers-file "<dealbreakers_file_or_/dev/null>" \
   --likes-file "<likes_file_or_/dev/null>"
 ```
@@ -66,7 +68,7 @@ Print:
 ```
 onboarded — config at ~/.jessy/config.yaml, prefs at ~/.jessy/preferences.md
 edit via /jessy:config or /jessy:prefs any time
-first scan/report may ask for Chrome extension access; allow it for the upcoming LinkedIn tab read/open actions
+first scan/report may ask for Chrome extension access; allow it for the upcoming job tab read/open actions
 ```
 
 Then return control to the caller (do not continue with a scan / report
@@ -76,6 +78,6 @@ automatically — each caller decides).
 
 - Open an editor (Bash tool has no TTY).
 - Launch Chrome, scan, score, or query the DB.
-- Validate LinkedIn URLs beyond what
+- Validate platform URLs beyond what
   `${CLAUDE_PLUGIN_ROOT}/scripts/onboard.sh` does (HTTP + linkedin.com
-  domain). Invalid URLs are silently dropped with a log line.
+  or wellfound.com domain). Invalid URLs are silently dropped with a log line.

@@ -38,7 +38,7 @@ fi
 
 cat > "$DST" <<'EOF'
 ---
-description: Full jessy pass — scan open LinkedIn tabs, then render report. Requires the jessy plugin to be loaded.
+description: Full jessy pass — scan open job tabs, then render report. Requires the jessy plugin to be loaded.
 disable-model-invocation: true
 allowed-tools:
   - Skill(jessy-onboard)

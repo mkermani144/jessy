@@ -13,12 +13,12 @@ usage: db_scan.sh <subcommand> [args...]
 subcommands:
   attempted_many <url...>
     print "<url>\t<yes|no>" for each URL
-  skip_job <url> <company> <title> <desc> <score> <rationale>
+  skip_job [platform] <url> <company> <title> <desc> <score> <rationale>
     start attempt, insert ignored job row, finish scored
-  score_job <url> <company> <company_size> <title> <desc> \
+  score_job [platform] <url> <company> <company_size> <title> <desc> \
             <req_json> <nice_json> <score> <rationale> [extract_json]
     start attempt, insert scored job row, finish scored with extraction JSON
-  fail_attempt <url> <reason> [extract_json]
+  fail_attempt [platform] <url> <reason> [extract_json]
     start attempt, finish failed
   bump_learn <delta>
     add delta to meta jobs_since_last_learn
@@ -35,30 +35,47 @@ cmd_attempted_many() {
 }
 
 cmd_skip_job() {
-  [[ $# -eq 6 ]] || usage
+  [[ $# -eq 6 || $# -eq 7 ]] || usage
+  local platform="linkedin"
+  if [[ $# -eq 7 ]]; then
+    platform="$1"
+    shift
+  fi
   local url="$1" company="$2" title="$3" desc="$4" score="$5" rationale="$6"
-  "$DB_SH" attempt_start "$url" linkedin >/dev/null
+  "$DB_SH" attempt_start "$url" "$platform" >/dev/null
   local cid
   cid="$("$DB_SH" upsert_company "$company" "" "")"
-  "$DB_SH" insert_job "$url" "$cid" "$title" "$desc" '[]' '[]' linkedin "$score" "$rationale"
+  "$DB_SH" insert_job "$url" "$cid" "$title" "$desc" '[]' '[]' "$platform" "$score" "$rationale"
   "$DB_SH" attempt_finish "$url" scored "" "$score" "$rationale" >/dev/null
 }
 
 cmd_score_job() {
   [[ $# -ge 9 ]] || usage
+  local platform="linkedin"
+  if [[ "$1" != http://* && "$1" != https://* ]]; then
+    platform="$1"
+    shift
+    [[ $# -ge 9 ]] || usage
+  fi
   local url="$1" company="$2" size="$3" title="$4" desc="$5"
   local req="$6" nice="$7" score="$8" rationale="$9" extract_json="${10:-}"
-  "$DB_SH" attempt_start "$url" linkedin >/dev/null
+  "$DB_SH" attempt_start "$url" "$platform" >/dev/null
   local cid
   cid="$("$DB_SH" upsert_company "$company" "$size" "")"
-  "$DB_SH" insert_job "$url" "$cid" "$title" "$desc" "$req" "$nice" linkedin "$score" "$rationale"
+  "$DB_SH" insert_job "$url" "$cid" "$title" "$desc" "$req" "$nice" "$platform" "$score" "$rationale"
   "$DB_SH" attempt_finish "$url" scored "$extract_json" "$score" "$rationale" >/dev/null
 }
 
 cmd_fail_attempt() {
   [[ $# -ge 2 ]] || usage
+  local platform="linkedin"
+  if [[ "$1" != http://* && "$1" != https://* ]]; then
+    platform="$1"
+    shift
+    [[ $# -ge 2 ]] || usage
+  fi
   local url="$1" reason="$2" extract_json="${3:-}"
-  "$DB_SH" attempt_start "$url" linkedin >/dev/null
+  "$DB_SH" attempt_start "$url" "$platform" >/dev/null
   "$DB_SH" attempt_finish "$url" failed "$extract_json" "" "$reason"
 }
 

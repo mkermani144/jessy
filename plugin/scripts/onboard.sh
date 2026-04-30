@@ -31,6 +31,7 @@ command -v sqlite3 >/dev/null 2>&1 || {
 FORCE=0
 NON_INTERACTIVE=0
 URLS_FILE_ARG=""
+WF_URLS_FILE_ARG=""
 DB_FILE_ARG=""
 LK_FILE_ARG=""
 
@@ -39,12 +40,14 @@ while [[ $# -gt 0 ]]; do
     --force)             FORCE=1; shift ;;
     --non-interactive)   NON_INTERACTIVE=1; shift ;;
     --urls-file)         URLS_FILE_ARG="$2"; shift 2 ;;
+    --wellfound-urls-file) WF_URLS_FILE_ARG="$2"; shift 2 ;;
     --dealbreakers-file) DB_FILE_ARG="$2";   shift 2 ;;
     --likes-file)        LK_FILE_ARG="$2";   shift 2 ;;
     -h|--help)
       cat <<'EOF'
 usage: onboard.sh [--force] [--non-interactive \
                              --urls-file <path> \
+                             --wellfound-urls-file <path> \
                              --dealbreakers-file <path> \
                              --likes-file <path>]
 
@@ -54,7 +57,8 @@ Interactive mode (default): prompts from stdin. Each prompt reads lines
   until a blank line. Requires a TTY.
 
 Non-interactive mode (--non-interactive): reads values from files.
-  Each file holds one entry per line. Missing / empty files = empty input.
+  Each file holds one entry per line. --urls-file is LinkedIn for backwards
+  compatibility. Missing / empty files = empty input.
   Designed for Claude Code's Bash tool which has no TTY.
 
 Re-runs are no-ops unless --force, which backs up existing files first.
@@ -107,18 +111,32 @@ backup_existing() {
 }
 
 write_config() {
-  # $@ = startup urls
-  local tmp; tmp=$(mktemp)
-  cp "$CONFIG_TEMPLATE" "$tmp"
-  if [[ $# -gt 0 ]]; then
-    {
-      sed -n '1,/^  startup_urls:/p' "$tmp" | sed '$d'
-      printf '  startup_urls:\n'
-      for u in "$@"; do printf '    - %s\n' "$u"; done
-      sed -n '/^  startup_urls:/,$p' "$tmp" | tail -n +2
-    } > "${tmp}.new"
-    mv "${tmp}.new" "$tmp"
-  fi
+  # $1 = LinkedIn URLs file, $2 = Wellfound URLs file.
+  # Keeps the template authoritative, only replacing non-empty startup lists.
+  local li_file="$1" wf_file="$2" tmp li_has=0 wf_has=0
+  tmp=$(mktemp)
+  [[ -s "$li_file" ]] && li_has=1
+  [[ -s "$wf_file" ]] && wf_has=1
+  awk -v li="$li_file" -v wf="$wf_file" -v li_has="$li_has" -v wf_has="$wf_has" '
+    function emit(file,    line) {
+      while ((getline line < file) > 0) {
+        if (line != "") print "      - " line
+      }
+      close(file)
+    }
+    /^  linkedin:/  { platform="linkedin" }
+    /^  wellfound:/ { platform="wellfound" }
+    /^  [A-Za-z0-9_-]+:/ && $0 !~ /^  (linkedin|wellfound):/ { platform="" }
+    skip && /^      - / { next }
+    { skip=0 }
+    platform=="linkedin" && /^    startup_urls:/ && li_has == "1" {
+      print "    startup_urls:"; emit(li); skip=1; next
+    }
+    platform=="wellfound" && /^    startup_urls:/ && wf_has == "1" {
+      print "    startup_urls:"; emit(wf); skip=1; next
+    }
+    { print }
+  ' "$CONFIG_TEMPLATE" > "$tmp"
   mv "$tmp" "$CONFIG_FILE"
 }
 
@@ -166,28 +184,34 @@ if [[ $have_config -eq 1 && $have_prefs -eq 1 && $have_db -eq 1 ]]; then
 fi
 
 # Capture inputs for missing files
-URLS_FILE=$(mktemp); DB_BUL=$(mktemp); LK_BUL=$(mktemp)
-trap 'rm -f "$URLS_FILE" "$DB_BUL" "$LK_BUL"' EXIT
+URLS_FILE=$(mktemp); WF_URLS_FILE=$(mktemp); DB_BUL=$(mktemp); LK_BUL=$(mktemp)
+trap 'rm -f "$URLS_FILE" "$WF_URLS_FILE" "$DB_BUL" "$LK_BUL"' EXIT
 
 if [[ $NON_INTERACTIVE -eq 1 ]]; then
   [[ $have_config -eq 0 ]] && copy_if_file "$URLS_FILE_ARG" "$URLS_FILE"
+  [[ $have_config -eq 0 ]] && copy_if_file "$WF_URLS_FILE_ARG" "$WF_URLS_FILE"
   if [[ $have_prefs -eq 0 ]]; then
     copy_if_file "$DB_FILE_ARG" "$DB_BUL"
     copy_if_file "$LK_FILE_ARG" "$LK_BUL"
   fi
-  # Filter URLs for LinkedIn domain
+  # Filter startup URLs by platform. Invalid URLs are ignored.
   if [[ -s "$URLS_FILE" ]]; then
     grep -E "^https?://([a-z]+\.)?linkedin\.com/jobs/" "$URLS_FILE" > "${URLS_FILE}.f" || true
     mv "${URLS_FILE}.f" "$URLS_FILE"
   fi
+  if [[ -s "$WF_URLS_FILE" ]]; then
+    grep -E "^https?://([a-z]+\.)?wellfound\.com/(jobs|role|location|remote)(/|$)" "$WF_URLS_FILE" > "${WF_URLS_FILE}.f" || true
+    mv "${WF_URLS_FILE}.f" "$WF_URLS_FILE"
+  fi
 else
   cat >&2 <<'EOF'
 
-jessy = LinkedIn job scanner. scans tabs, scores vs prefs, ranks.
+jessy = job scanner. scans tabs, scores vs prefs, ranks.
 config in ~/.jessy/. setup takes ~1 min.
 EOF
   if [[ $have_config -eq 0 ]]; then
     prompt_lines "LinkedIn search URLs" "^https?://([a-z]+\.)?linkedin\.com/jobs/" > "$URLS_FILE"
+    prompt_lines "Wellfound search URLs" "^https?://([a-z]+\.)?wellfound\.com/(jobs|role|location|remote)(/|$)" > "$WF_URLS_FILE"
   fi
   if [[ $have_prefs -eq 0 ]]; then
     prompt_lines "Dealbreakers" "" > "$DB_BUL"
@@ -197,14 +221,11 @@ fi
 
 # Write missing files
 if [[ $have_config -eq 0 ]]; then
-  urls=()
-  while IFS= read -r _u; do urls+=("$_u"); done < "$URLS_FILE"
-  if [[ ${#urls[@]} -gt 0 ]]; then
-    write_config "${urls[@]}"
-  else
-    write_config
-  fi
-  printf 'wrote %s (%d url(s))\n' "$CONFIG_FILE" "${#urls[@]}" >&2
+  li_count=0; wf_count=0
+  [[ -s "$URLS_FILE" ]] && li_count=$(wc -l < "$URLS_FILE" | tr -d ' ')
+  [[ -s "$WF_URLS_FILE" ]] && wf_count=$(wc -l < "$WF_URLS_FILE" | tr -d ' ')
+  write_config "$URLS_FILE" "$WF_URLS_FILE"
+  printf 'wrote %s (%d LinkedIn url(s), %d Wellfound url(s))\n' "$CONFIG_FILE" "$li_count" "$wf_count" >&2
 fi
 
 if [[ $have_prefs -eq 0 ]]; then

@@ -1,12 +1,13 @@
 # jessy-scan extractor task
 
-Invoke the custom `jessy-linkedin-extractor` Agent for exactly one LinkedIn
-job card. Main thread handles enumeration, preferences, scoring, and DB
-writes. The Agent returns strict JSON only.
+Invoke the platform extractor Agent for exactly one job card. Main thread
+handles enumeration, preferences, scoring, and DB writes. The Agent returns
+strict JSON only.
 
 ## Inputs
 
-- `canonical_url`: `https://www.linkedin.com/jobs/view/<id>`
+- `platform`: `linkedin` or `wellfound`
+- `canonical_url`: platform canonical job detail URL
 - `card_title`: title from the list
 - `card_company_name`: company from the list
 - `card_location`: location from the list
@@ -17,16 +18,19 @@ Do not send user preferences or scoring rubric to the Agent.
 
 ## Task
 
-1. Open `canonical_url` in the current attached Chrome context.
-2. Wait for the job detail body.
-3. If description has `See more`, expand it.
-4. Read authoritative title, company, location, seniority, employment type,
+1. Choose extractor:
+   - `linkedin` -> `jessy-linkedin-extractor`
+   - `wellfound` -> `jessy-wellfound-extractor`
+2. Open `canonical_url` in the current attached Chrome context.
+3. Wait for the job detail body.
+4. If description has `See more` or collapsed body text, expand it.
+5. Read authoritative title, company, location, seniority, employment type,
    salary, visa, requirements, nice-to-haves, and short responsibility
    summary.
-5. Do not open company pages.
-6. Do not open extra tabs.
-7. Do not judge fit.
-8. Do not include full job description or boilerplate.
+6. Do not open company pages.
+7. Do not open extra tabs.
+8. Do not judge fit.
+9. Do not include full job description or boilerplate.
 
 If a mechanical load issue happens, return `failed` with one of:
 
@@ -49,7 +53,7 @@ Return exactly one JSON object, no markdown, no prose:
 ```json
 {
   "status": "ok",
-  "url": "https://www.linkedin.com/jobs/view/123",
+  "url": "https://wellfound.com/jobs/123-staff-backend-engineer",
   "lang": "en",
   "title": "Staff Backend Engineer",
   "company": "Acme",
@@ -71,7 +75,7 @@ Failure shape:
 ```json
 {
   "status": "failed",
-  "url": "https://www.linkedin.com/jobs/view/123",
+  "url": "https://wellfound.com/jobs/123-staff-backend-engineer",
   "reason": "detail_not_loaded"
 }
 ```

@@ -1,5 +1,5 @@
 ---
-description: Run a full jessy pass — scan open LinkedIn tabs, then render the report. Requires `claude --chrome`.
+description: Run a full jessy pass — scan open job tabs, then render the report. Requires `claude --chrome`.
 disable-model-invocation: true
 allowed-tools:
   - Skill(jessy-onboard)

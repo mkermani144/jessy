@@ -92,7 +92,8 @@ On the company page (`linkedin.com/company/<slug>/`):
 
 ## Pagination strategy
 
-For each search tab, walk pages up to `linkedin.max_pages` (config).
+For each search tab, walk pages up to `platforms.linkedin.max_pages`
+(config; legacy `linkedin.max_pages` still works for old configs).
 
 Stopping rule (**same-list detection**): before opening any card on a new
 page, compare the first 3 card URLs against the first 3 URLs from the
@@ -108,8 +109,8 @@ that tab.
 
 ## Boundary / skip rules (read by jessy-scan)
 
-- Title prefilter: drop cards whose title matches any
-  `linkedin.skip_title_keywords` (config) before opening.
+- Title prefilter: drop cards whose title matches any global
+  `skip_title_keywords` entry before opening.
 - Attempt boundary: if a canonical URL exists in Jessy's attempted state,
   stop lower/older cards for that tab/feed. Do not use LinkedIn `viewed`.
   Canonicalize by stripping query params except `currentJobId`, or use

@@ -1,18 +1,18 @@
 # jessy plugin
 
 Claude Code plugin replacing Rust `jessy`. Drives Chrome via `claude --chrome`,
-scans LinkedIn job tabs, scores against user prefs, renders ranked report.
-Scan flow stops each tab/feed at the first Jessy-attempted card, then runs the
-custom Haiku `jessy-linkedin-extractor` subagent one card at a time for only
-new cards. Extractors do not receive preferences or scoring rubric; the main
-agent scores extracted JSON.
+scans LinkedIn / Wellfound job tabs, scores against user prefs, renders ranked
+report. Scan flow stops each tab/feed at the first Jessy-attempted card, then
+runs the platform Haiku extractor subagent one card at a time for only new
+cards. Extractors do not receive preferences or scoring rubric; the main agent
+scores extracted JSON.
 
 ## Commands
 
 | Command          | What |
 |------------------|------|
 | `/jessy:run`     | Full pass: scan + report. |
-| `/jessy:scan`    | Scan open LinkedIn tabs, score, persist. Needs `claude --chrome`. |
+| `/jessy:scan`    | Scan open LinkedIn / Wellfound tabs, score, persist. Needs `claude --chrome`. |
 | `/jessy:report`  | Open ranked report in tmux/less; pick rows; mark seen. |
 | `/jessy:learn`   | Mine recent open/dismiss patterns; suggest `preferences.md` updates. |
 | `/jessy:cleanup` | Prune old / acted-on rows. Never touches unseen rows. |
@@ -46,8 +46,8 @@ alias claude-jessy='claude --settings /absolute/path/to/jessy/plugin/.claude/set
 
 `--chrome` is needed for `/jessy:scan` and `/jessy:report` — tab read/open
 uses the attached Chrome session. On first use, allow the Claude-in-Chrome
-extension for the upcoming LinkedIn tab actions; normal runs assume that access
-is already granted.
+extension for the upcoming job tab actions; normal runs assume that access is
+already granted.
 
 ### Permissions / approval prompts
 
@@ -109,8 +109,8 @@ Until then, use `--plugin-dir`.
   `--non-interactive` mode driven by AskUserQuestion. Running
   `onboard.sh` directly in a terminal uses stdin prompts.
 - **Scan opens 0 tabs**: confirm `claude --chrome` is attached and a
-  LinkedIn search/collections tab is open in that browser; or set
-  `linkedin.startup_urls` in config and re-run.
+  LinkedIn or Wellfound list tab is open in that browser; or set
+  `platforms.<name>.startup_urls` in config and re-run.
 - **`db.sh: sqlite3 not on PATH`**: only happens on stripped images;
   `brew install sqlite3`.
 
@@ -153,7 +153,7 @@ After `claude --plugin-dir ...`:
 13. `bash plugin/scripts/db.sh attempted https://www.linkedin.com/jobs/view/1`
     prints `yes`; `... view/999` prints `no`. `seen` is a backcompat alias.
 14. `bash plugin/scripts/db.sh count` prints the row count.
-15. With `claude --chrome` and a LinkedIn search tab open,
+15. With `claude --chrome` and a LinkedIn / Wellfound search tab open,
     `/jessy:scan` walks pages, prints `scanned N new; M match; K low; L ignored`,
     and rows appear in `jobs` / `job_attempts`. Re-running immediately scans
     0 new because the first attempted card stops each tab/feed.
@@ -201,8 +201,10 @@ plugin/
     jessy-report/SKILL.md
     jessy-scan/SKILL.md
     platforms/linkedin/SKILL.md
+    platforms/wellfound/SKILL.md
   agents/
     jessy-linkedin-extractor.md
+    jessy-wellfound-extractor.md
   commands/
     cleanup.md
     config.md

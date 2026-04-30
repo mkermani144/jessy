@@ -53,6 +53,14 @@ grep -q '"evidence":\["Remote - United States"\]' <<<"$report"
 "$SCAN_DB" fail_attempt https://www.linkedin.com/jobs/view/5 detail_not_loaded '{"status":"failed"}'
 [[ "$("$DB" attempted https://www.linkedin.com/jobs/view/5)" == "yes" ]]
 
+wf_extract='{"status":"ok","url":"https://wellfound.com/jobs/123-engineer","lang":"en","location":"remote US","seniority":"senior","employment":"full_time","salary":"$150k","visa":"unknown","summary":["Build product"],"evidence":["Remote only"]}'
+[[ "$("$SCAN_DB" score_job wellfound https://wellfound.com/jobs/123-engineer Acme unknown Engineer desc '["rust"]' '[]' 82 good "$wf_extract")" == "inserted" ]]
+wf_platform="$(sqlite3 "$TMP_DB" "SELECT platform FROM jobs WHERE url = 'https://wellfound.com/jobs/123-engineer';")"
+[[ "$wf_platform" == "wellfound" ]]
+"$SCAN_DB" fail_attempt wellfound https://wellfound.com/jobs/124-engineer detail_not_loaded '{"status":"failed"}'
+wf_attempt_platform="$(sqlite3 "$TMP_DB" "SELECT platform FROM job_attempts WHERE url = 'https://wellfound.com/jobs/124-engineer';")"
+[[ "$wf_attempt_platform" == "wellfound" ]]
+
 "$DB" meta_set jobs_since_last_learn 2
 "$SCAN_DB" bump_learn 3
 [[ "$("$DB" meta_get jobs_since_last_learn)" == "5" ]]
