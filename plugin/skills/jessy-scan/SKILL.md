@@ -72,4 +72,6 @@ timing only if workers return compact timing fields.
 - No main-thread DB row dumps.
 - No report rendering.
 - No parallel browser workers.
-- No parallel judge workers until `db_stage.sh claim` is the only claim path.
+- Parallel judge workers are allowed only through `db_stage.sh claim_batch`;
+  start with serial batches and enable parallelism only after local claim
+  tests pass.

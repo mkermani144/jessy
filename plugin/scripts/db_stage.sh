@@ -66,7 +66,7 @@ require_status() {
 
 db() {
   require_sqlite
-  sqlite3 -bail -batch "$JESSY_DB"
+  sqlite3 -cmd 'PRAGMA busy_timeout=5000;' -bail -batch "$JESSY_DB"
 }
 
 cmd_run_create() {
