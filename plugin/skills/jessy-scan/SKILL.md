@@ -7,6 +7,8 @@ user-invocable: false
 allowed-tools:
   - Skill(jessy-onboard)
   - Agent
+  - mcp__claude-in-chrome
+  - mcp__claude-in-chrome__*
 ---
 
 # jessy-scan
@@ -24,7 +26,8 @@ cards, extracted JSON, snapshot rows, or script row dumps.
 ## Flow
 
 1. Invoke `jessy-ops-worker` to initialize DB, read small config flags, create
-   a `runs` row, and enqueue browser work. It returns `{run_id,next,status}`.
+   a `runs` row, and enqueue browser work. It returns
+   `{run_id,next,status,db_path}`.
 2. Loop `jessy-browser-worker` serially until its receipt says `done:true`.
    Browser worker owns Chrome, history/title prefilter, `page_snapshots`,
    `job_seeds`, `detail_snapshots`, and browser-stage item status.
@@ -41,6 +44,15 @@ Use Agent with these custom agent names:
 - `jessy-ops-worker`
 - `jessy-browser-worker`
 - `jessy-judge-worker`
+
+Pass `run_id` and `db_path` to every worker invocation. Workers must call DB
+helpers with the explicit global flag:
+
+```text
+${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> ...
+${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh --db <db_path> ...
+${CLAUDE_PLUGIN_ROOT}/scripts/db.sh --db <db_path> ...
+```
 
 Each worker response must be a compact receipt. Acceptable examples:
 

@@ -29,14 +29,17 @@ Allowed work:
 
 Prepare flow:
 
-1. Run `db.sh init`.
-2. Read only small config flags and file existence.
-3. Create a run and initial browser queue item with `db_stage.sh prepare_run`.
-4. Browser workers enqueue judge refs after detail snapshots exist.
-5. Return `{run_id,status,next}`.
+1. Determine `db_path` from the invoking prompt if supplied, otherwise
+   `${JESSY_DB:-$HOME/.jessy/jessy.db}`.
+2. Run `db.sh --db <db_path> init`.
+3. Read only small config flags and file existence.
+4. Create a run and initial browser queue item with
+   `db_stage.sh --db <db_path> prepare_run`.
+5. Browser workers enqueue judge refs after detail snapshots exist.
+6. Return `{run_id,status,next,db_path}`.
 
-Use `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh` for run and queue state.
-Use `${CLAUDE_PLUGIN_ROOT}/scripts/db.sh` / `db_scan.sh` for legacy DB tasks.
+Use explicit `--db <db_path>` for every DB helper call. Do not rely on
+environment inheritance across subagents.
 
 Return only JSON/text receipts, for example:
 

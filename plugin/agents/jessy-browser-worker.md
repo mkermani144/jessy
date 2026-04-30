@@ -22,6 +22,9 @@ Rules:
 
 - Serial by default; Chrome state is shared.
 - Read small config/platform docs only.
+- Use the `db_path` from the invoking prompt for every DB helper call:
+  `db_stage.sh --db <db_path> ...`, `db_scan.sh --db <db_path> ...`,
+  `db.sh --db <db_path> ...`.
 - Never return card text, HTML, extracted JSON, or descriptions in chat.
 - Persist list/detail payloads via `db_stage.sh`.
 - Return compact counts and next-state only.
@@ -41,18 +44,23 @@ Writes:
 
 Procedure:
 
-1. Claim one browser item with `db_stage.sh claim <run_id> browser`.
-2. Discover enabled LinkedIn / Wellfound list tabs; open startup URLs if no
+1. Preflight Chrome access by listing/reading tabs. If Chrome access fails,
+   return a failed receipt with `claimed:0` and do not claim DB work.
+2. Claim one browser item with `db_stage.sh --db <db_path> claim <run_id> browser`.
+3. Discover enabled LinkedIn / Wellfound list tabs; open startup URLs if no
    matching tabs exist.
-3. Capture compact visible list text/links, not full HTML.
-4. Canonicalize URLs:
+4. If Chrome access fails after claiming an item, immediately run
+   `db_stage.sh --db <db_path> fail <item_id> chrome_unavailable`, then
+   return a compact failed receipt.
+5. Capture compact visible list text/links, not full HTML.
+6. Canonicalize URLs:
    - LinkedIn: `https://www.linkedin.com/jobs/view/<id>`
    - Wellfound: `https://wellfound.com/jobs/<id>-<slug>`
-5. Batch-check history with `db_scan.sh attempted_many <url...>`.
-6. For new cards, persist seeds and bounded detail snapshots with
-   `db_stage.sh queue_detail`; this queues judge work by reference.
-7. Persist title/history skips as attempts.
-8. Finish/fail the stage item with `db_stage.sh finish` / `fail`.
+7. Batch-check history with `db_scan.sh --db <db_path> attempted_many <url...>`.
+8. For new cards, persist seeds and bounded detail snapshots with
+   `db_stage.sh --db <db_path> queue_detail`; this queues judge work by reference.
+9. Persist title/history skips as attempts.
+10. Finish/fail the stage item with `db_stage.sh --db <db_path> finish` / `fail`.
 
 Receipt shape:
 

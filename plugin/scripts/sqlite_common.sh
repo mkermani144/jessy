@@ -33,7 +33,23 @@ sqlite_check_writable() {
 
 sqlite_open() {
   sqlite_require
-  sqlite3 -cmd '.timeout 15000' -bail -batch "$1" "${@:2}"
+  local db_path="$1" err rc
+  shift
+  err="$(mktemp)"
+  if sqlite3 -cmd '.timeout 15000' -bail -batch "$db_path" "$@" 2>"$err"; then
+    rm -f "$err"
+    return 0
+  fi
+  rc=$?
+  if grep -qi 'readonly\|read-only\|write-protected' "$err"; then
+    echo "${0##*/}: DB write-protected: $db_path" >&2
+  elif grep -qi 'locked\|busy' "$err"; then
+    echo "${0##*/}: DB locked after 15s timeout: $db_path" >&2
+    echo "${0##*/}: close other Jessy/Claude sessions or retry" >&2
+  fi
+  cat "$err" >&2
+  rm -f "$err"
+  return "$rc"
 }
 
 sqlite_init_db() {

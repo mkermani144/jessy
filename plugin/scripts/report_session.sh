@@ -14,7 +14,7 @@ RENDER_SH="$SCRIPT_DIR/render_cards.sh"
 
 usage() {
   cat >&2 <<'EOF'
-usage: report_session.sh <prepare|prepare_receipt|consume|consume_receipt> [indices|all|none]
+usage: report_session.sh [--db <path>] <prepare|prepare_receipt|consume|consume_receipt> [indices|all|none]
 
 prepare
   Write report snapshot/cards/index files under temp storage, open cards in
@@ -28,6 +28,16 @@ prepare_receipt / consume_receipt
   Same operations, but print compact JSON receipts for report-worker use.
 EOF
   exit 2
+}
+
+parse_global_args() {
+  while [[ "${1:-}" == "--db" ]]; do
+    [[ -n "${2:-}" ]] || { echo "report_session.sh: --db requires <path>" >&2; exit 2; }
+    JESSY_DB="$2"
+    export JESSY_DB
+    shift 2
+  done
+  GLOBAL_ARGS=("$@")
 }
 
 sql_quote() {
@@ -294,6 +304,8 @@ cmd_consume_receipt() {
 }
 
 main() {
+  parse_global_args "$@"
+  set -- "${GLOBAL_ARGS[@]}"
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
   shift

@@ -8,7 +8,7 @@ DB_SH="$SCRIPT_DIR/db.sh"
 
 usage() {
   cat >&2 <<'EOF'
-usage: db_scan.sh <subcommand> [args...]
+usage: db_scan.sh [--db <path>] <subcommand> [args...]
 
 subcommands:
   attempted_many <url...>
@@ -24,6 +24,16 @@ subcommands:
     add delta to meta jobs_since_last_learn
 EOF
   exit 2
+}
+
+parse_global_args() {
+  while [[ "${1:-}" == "--db" ]]; do
+    [[ -n "${2:-}" ]] || { echo "db_scan.sh: --db requires <path>" >&2; exit 2; }
+    JESSY_DB="$2"
+    export JESSY_DB
+    shift 2
+  done
+  GLOBAL_ARGS=("$@")
 }
 
 cmd_attempted_many() {
@@ -88,6 +98,8 @@ cmd_bump_learn() {
 }
 
 main() {
+  parse_global_args "$@"
+  set -- "${GLOBAL_ARGS[@]}"
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
   shift

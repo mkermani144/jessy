@@ -30,12 +30,13 @@ Rules:
 
 - Do not run normal scan/report work.
 - Do not return recent row payloads in chat.
+- Use the `db_path` from the invoking prompt for every DB helper call.
 - Proposals must be short and sourced from repeated acted patterns.
 - Apply only selected candidate ids/labels received from the invoking flow.
 
 Propose mode:
 
-1. Run `db.sh recent_actions 50`.
+1. Run `db.sh --db <db_path> recent_actions 50`.
 2. Read `~/.jessy/preferences.md`.
 3. If fewer than ~10 acted rows exist, reset cadence and return skipped.
 4. Extract conservative signals: stack, seniority, domain, location, company
@@ -52,6 +53,6 @@ Apply mode:
 1. Read the selected candidate ids/labels from the invoking prompt.
 2. Append accepted bullets under `## Dealbreakers`, `## Dislikes`, or
    `## Likes`.
-3. Reset `jobs_since_last_learn` to `0`.
+3. Reset `jobs_since_last_learn` to `0` with `db.sh --db <db_path>`.
 4. Increment `next_cadence_idx`, clamped to the last configured cadence entry.
 5. Return one compact summary line.

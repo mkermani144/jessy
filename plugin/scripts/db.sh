@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/sqlite_common.sh"
 
 usage() {
   cat >&2 <<'EOF'
-usage: db.sh <subcommand> [args...]
+usage: db.sh [--db <path>] <subcommand> [args...]
 
 subcommands:
   init                              create DB and apply schema (idempotent)
@@ -49,6 +49,16 @@ env:
   JESSY_DB                          DB path (default: ~/.jessy/jessy.db)
 EOF
   exit 2
+}
+
+parse_global_args() {
+  while [[ "${1:-}" == "--db" ]]; do
+    [[ -n "${2:-}" ]] || { echo "db.sh: --db requires <path>" >&2; exit 2; }
+    JESSY_DB="$2"
+    export JESSY_DB
+    shift 2
+  done
+  GLOBAL_ARGS=("$@")
 }
 
 cmd_init() {
@@ -430,6 +440,8 @@ cmd_config_cadence() {
 }
 
 main() {
+  parse_global_args "$@"
+  set -- "${GLOBAL_ARGS[@]}"
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
   shift

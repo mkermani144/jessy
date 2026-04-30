@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/sqlite_common.sh"
 
 usage() {
   cat >&2 <<'EOF'
-usage: db_stage.sh <subcommand> [args...]
+usage: db_stage.sh [--db <path>] <subcommand> [args...]
 
 subcommands:
   prepare_run [config_hash] [browser_input_ref]
@@ -34,6 +34,16 @@ subcommands:
   summary <run_id>
 EOF
   exit 2
+}
+
+parse_global_args() {
+  while [[ "${1:-}" == "--db" ]]; do
+    [[ -n "${2:-}" ]] || { echo "db_stage.sh: --db requires <path>" >&2; exit 2; }
+    JESSY_DB="$2"
+    export JESSY_DB
+    shift 2
+  done
+  GLOBAL_ARGS=("$@")
 }
 
 init_db() {
@@ -410,6 +420,8 @@ SQL
 }
 
 main() {
+  parse_global_args "$@"
+  set -- "${GLOBAL_ARGS[@]}"
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
   shift

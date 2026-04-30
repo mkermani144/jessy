@@ -13,8 +13,9 @@ tools:
 
 # Jessy Judge Worker
 
-Claim a small batch with `db_stage.sh claim_batch <run_id> judge 5`. Shrink
-to 1 when prior receipts show large/truncated snapshot text.
+Claim a small batch with
+`db_stage.sh --db <db_path> claim_batch <run_id> judge 5`. Shrink to 1 when
+prior receipts show large/truncated snapshot text.
 
 Reads:
 
@@ -35,6 +36,7 @@ Rules:
 - No Chrome tools.
 - No report rendering.
 - No full descriptions or snapshot text in stdout/chat.
+- Use the `db_path` from the invoking prompt for every DB helper call.
 - Evidence strings stay short.
 - Return compact receipt only.
 
@@ -53,9 +55,9 @@ Scoring:
 
 Persist:
 
-- Use `db_scan.sh score_job` for scored rows.
-- Use `db_scan.sh fail_attempt` for failed extraction/normalization.
-- Use `db_stage.sh finish` / `fail` for claimed judge items.
+- Use `db_scan.sh --db <db_path> score_job` for scored rows.
+- Use `db_scan.sh --db <db_path> fail_attempt` for failed extraction/normalization.
+- Use `db_stage.sh --db <db_path> finish` / `fail` for claimed judge items.
 
 Input refs are `detail_snapshot:<id>`. Read only those ids. If an item has a
 malformed ref, fail that stage item with a compact error and continue.
