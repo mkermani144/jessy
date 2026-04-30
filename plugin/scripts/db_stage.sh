@@ -13,6 +13,7 @@ usage() {
 usage: db_stage.sh <subcommand> [args...]
 
 subcommands:
+  prepare_run [config_hash] [browser_input_ref]
   run_create [config_hash]
   run_finish <run_id> <ok|failed|paused> [error]
   event <run_id> <stage> <info|warn|error> <message> [meta_json]
@@ -71,6 +72,35 @@ cmd_run_create() {
 INSERT INTO runs(status, started_ts, config_hash)
 VALUES('running', CAST(strftime('%s','now') AS INTEGER), $(sql_quote "$config_hash"));
 SELECT json_object('status','ok','run_id',last_insert_rowid(),'next','browser');
+SQL
+}
+
+cmd_prepare_run() {
+  init_db
+  local config_hash="${1:-}" input_ref="${2:-browser:scan}"
+  db <<SQL
+BEGIN IMMEDIATE;
+INSERT INTO runs(status, started_ts, config_hash)
+VALUES('running', CAST(strftime('%s','now') AS INTEGER), $(sql_quote "$config_hash"));
+CREATE TEMP TABLE new_run(id INTEGER PRIMARY KEY);
+INSERT INTO new_run(id) VALUES(last_insert_rowid());
+INSERT INTO stage_items(
+  run_id, stage, status, input_ref, created_ts, updated_ts
+)
+SELECT id, 'browser', 'pending', $(sql_quote "$input_ref"),
+       CAST(strftime('%s','now') AS INTEGER),
+       CAST(strftime('%s','now') AS INTEGER)
+FROM new_run;
+INSERT INTO stage_events(run_id, stage, level, message, ts)
+SELECT id, 'ops', 'info', 'run prepared', CAST(strftime('%s','now') AS INTEGER)
+FROM new_run;
+SELECT json_object(
+  'status','ok',
+  'run_id',(SELECT id FROM new_run),
+  'next','browser',
+  'browser_items',1
+);
+COMMIT;
 SQL
 }
 
@@ -278,6 +308,7 @@ main() {
   [[ -n "$sub" ]] || usage
   shift
   case "$sub" in
+    prepare_run)     cmd_prepare_run "$@" ;;
     run_create)      cmd_run_create "$@" ;;
     run_finish)      cmd_run_finish "$@" ;;
     event)           cmd_event "$@" ;;

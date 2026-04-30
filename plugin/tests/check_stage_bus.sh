@@ -10,20 +10,28 @@ trap 'rm -f "$TMP_DB"' EXIT
 
 export JESSY_DB="$TMP_DB"
 
+prepare_receipt="$("$STAGE" prepare_run hash-1 browser:start)"
+grep -q '"status":"ok"' <<<"$prepare_receipt"
+grep -q '"next":"browser"' <<<"$prepare_receipt"
+prep_run_id="$(sqlite3 "$TMP_DB" 'SELECT id FROM runs WHERE config_hash = "hash-1";')"
+[[ "$prep_run_id" == "1" ]]
+[[ "$(sqlite3 "$TMP_DB" 'SELECT stage || ":" || status || ":" || input_ref FROM stage_items WHERE run_id = 1;')" == "browser:pending:browser:start" ]]
+
 run_receipt="$("$STAGE" run_create test-hash)"
 grep -q '"status":"ok"' <<<"$run_receipt"
-run_id="$(sqlite3 "$TMP_DB" 'SELECT id FROM runs LIMIT 1;')"
-[[ "$run_id" == "1" ]]
+run_id="$(sqlite3 "$TMP_DB" 'SELECT id FROM runs WHERE config_hash = "test-hash" LIMIT 1;')"
+[[ "$run_id" == "2" ]]
 
 enqueue_receipt="$("$STAGE" enqueue "$run_id" browser tab:1)"
-grep -q '"item_id":1' <<<"$enqueue_receipt"
+grep -q '"item_id":' <<<"$enqueue_receipt"
+item_id="$(sqlite3 "$TMP_DB" "SELECT id FROM stage_items WHERE run_id = $run_id AND input_ref = 'tab:1';")"
 
 claim_receipt="$("$STAGE" claim "$run_id" browser worker-a)"
 grep -q '"claimed":1' <<<"$claim_receipt"
 grep -q '"input_ref":"tab:1"' <<<"$claim_receipt"
-[[ "$(sqlite3 "$TMP_DB" 'SELECT attempts FROM stage_items WHERE id = 1;')" == "1" ]]
+[[ "$(sqlite3 "$TMP_DB" "SELECT attempts FROM stage_items WHERE id = $item_id;")" == "1" ]]
 
-done_receipt="$("$STAGE" finish 1 done '{"wrote":1}')"
+done_receipt="$("$STAGE" finish "$item_id" done '{"wrote":1}')"
 grep -q '"item_status":"done"' <<<"$done_receipt"
 
 payload='Visible job detail that must never appear in stdout receipts.'

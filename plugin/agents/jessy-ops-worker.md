@@ -31,8 +31,8 @@ Prepare flow:
 
 1. Run `db.sh init`.
 2. Read only small config flags and file existence.
-3. Create a run with `db_stage.sh run_create`.
-4. Enqueue coarse `browser` then `judge` stages with refs, not payloads.
+3. Create a run and initial browser queue item with `db_stage.sh prepare_run`.
+4. Browser workers enqueue judge refs after detail snapshots exist.
 5. Return `{run_id,status,next}`.
 
 Use `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh` for run and queue state.
