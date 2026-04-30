@@ -57,6 +57,13 @@ grep -q 'Review report outside chat' <<< "$prepare_out"
 ! grep -q 'Match Job' <<< "$prepare_out"
 ! grep -q 'https://jobs.example.com' <<< "$prepare_out"
 
+receipt="$("$REPORT" prepare_receipt)"
+grep -q '"agent":"jessy-report-worker"' <<< "$receipt"
+grep -q '"status":"paused"' <<< "$receipt"
+grep -q '"pause_token":' <<< "$receipt"
+! grep -q 'Match Job' <<< "$receipt"
+! grep -q 'https://jobs.example.com' <<< "$receipt"
+
 [[ -s "$snapshot" ]]
 [[ -s "$cards" ]]
 [[ -s "$index" ]]
@@ -86,3 +93,9 @@ setup_db
 "$REPORT" prepare >/dev/null
 summary="$("$REPORT" consume none)"
 [[ "$summary" == "opened 0; dismissed 3; unseen 0." ]]
+
+setup_db
+"$REPORT" prepare_receipt >/dev/null
+receipt="$("$REPORT" consume_receipt none)"
+grep -q '"summary":"opened 0; dismissed 3; unseen 0."' <<< "$receipt"
+grep -q '"learn_due":false' <<< "$receipt"

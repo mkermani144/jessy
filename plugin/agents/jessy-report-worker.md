@@ -25,8 +25,8 @@ Rules:
 - Do not hold open waiting for user input.
 - Do not print JSONL rows, cards, or index maps into chat.
 - Main agent receives only temp paths, prompt, pause token, and final summary.
-- `prepare` runs `report_session.sh prepare`.
-- `consume` runs `report_session.sh consume "<raw choice>"`.
+- `prepare` runs `report_session.sh prepare_receipt`.
+- `consume` runs `report_session.sh consume_receipt "<raw choice>"`.
 - After consume, check cadence with `db.sh meta_get` and `db.sh config_cadence`.
 
 Prepare receipt should include:

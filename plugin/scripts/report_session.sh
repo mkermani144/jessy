@@ -14,7 +14,7 @@ RENDER_SH="$SCRIPT_DIR/render_cards.sh"
 
 usage() {
   cat >&2 <<'EOF'
-usage: report_session.sh <prepare|consume> [indices|all|none]
+usage: report_session.sh <prepare|prepare_receipt|consume|consume_receipt> [indices|all|none]
 
 prepare
   Write report snapshot/cards/index files under temp storage, open cards in
@@ -23,8 +23,27 @@ prepare
 consume <indices|all|none>
   Read the saved snapshot/index map, apply picked URLs via db.sh
   consume_report, and print the final one-line summary only.
+
+prepare_receipt / consume_receipt
+  Same operations, but print compact JSON receipts for report-worker use.
 EOF
   exit 2
+}
+
+sql_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
+json_quote() {
+  sqlite3 -batch ':memory:' "SELECT json_quote($(sql_quote "$1"));"
+}
+
+json_bool() {
+  if [[ "$1" == "1" ]]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
 }
 
 shell_quote() {
@@ -143,6 +162,27 @@ cmd_prepare() {
   printf '%s\n' "$prompt"
 }
 
+cmd_prepare_receipt() {
+  local out snapshot cards index state prompt status
+  out="$(cmd_prepare)"
+  snapshot="$(awk -F= '$1 == "snapshot" { print substr($0, index($0, "=") + 1) }' <<<"$out")"
+  cards="$(awk -F= '$1 == "cards" { print substr($0, index($0, "=") + 1) }' <<<"$out")"
+  index="$(awk -F= '$1 == "index_map" { print substr($0, index($0, "=") + 1) }' <<<"$out")"
+  state="$(awk -F= '$1 == "state" { print substr($0, index($0, "=") + 1) }' <<<"$out")"
+  prompt="$(tail -n 1 <<<"$out")"
+  status="paused"
+  case "$prompt" in
+    "No unseen jobs"*) status="ok" ;;
+  esac
+  printf '{"agent":"jessy-report-worker","status":%s,"snapshot":%s,"cards":%s,"index_map":%s,"pause_token":%s,"prompt":%s}\n' \
+    "$(json_quote "$status")" \
+    "$(json_quote "$snapshot")" \
+    "$(json_quote "$cards")" \
+    "$(json_quote "$index")" \
+    "$(json_quote "$state")" \
+    "$(json_quote "$prompt")"
+}
+
 load_state() {
   # Sets globals SNAPSHOT_FILE, INDEX_FILE, DB_FILE from the last prepare.
   SNAPSHOT_FILE=""
@@ -223,13 +263,45 @@ cmd_consume() {
   "$DB_SH" consume_report "${PICKED_URLS[@]}" < "$SNAPSHOT_FILE"
 }
 
+cadence_receipt_fields() {
+  local since idx cadence_lines cadence_len target learn_due
+  since="$("$DB_SH" meta_get jobs_since_last_learn)"
+  idx="$("$DB_SH" meta_get next_cadence_idx)"
+  [[ "$since" =~ ^[0-9]+$ ]] || since=0
+  [[ "$idx" =~ ^[0-9]+$ ]] || idx=0
+  cadence_lines="$("$DB_SH" config_cadence || true)"
+  cadence_len="$(awk 'NF { n++ } END { print n + 0 }' <<<"$cadence_lines")"
+  target=0
+  learn_due=0
+  if [[ "$cadence_len" -gt 0 ]]; then
+    if [[ "$idx" -ge "$cadence_len" ]]; then
+      idx=$((cadence_len - 1))
+    fi
+    target="$(awk -v want="$((idx + 1))" 'NF { n++; if (n == want) { print; exit } }' <<<"$cadence_lines")"
+    [[ "$target" =~ ^[0-9]+$ ]] || target=0
+    [[ "$since" -ge "$target" && "$target" -gt 0 ]] && learn_due=1
+  fi
+  printf '"learn_due":%s,"learn_since":%d,"learn_target":%d' \
+    "$(json_bool "$learn_due")" "$since" "$target"
+}
+
+cmd_consume_receipt() {
+  local summary
+  summary="$(cmd_consume "$@")"
+  printf '{"agent":"jessy-report-worker","status":"ok","summary":%s,%s}\n' \
+    "$(json_quote "$summary")" \
+    "$(cadence_receipt_fields)"
+}
+
 main() {
   local sub="${1:-}"
   [[ -n "$sub" ]] || usage
   shift
   case "$sub" in
     prepare) [[ $# -eq 0 ]] || usage; cmd_prepare ;;
+    prepare_receipt) [[ $# -eq 0 ]] || usage; cmd_prepare_receipt ;;
     consume) cmd_consume "$@" ;;
+    consume_receipt) cmd_consume_receipt "$@" ;;
     -h|--help|help) usage ;;
     *) echo "report_session.sh: unknown subcommand: $sub" >&2; usage ;;
   esac
