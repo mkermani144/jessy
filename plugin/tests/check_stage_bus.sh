@@ -47,15 +47,22 @@ detail_receipt="$("$STAGE" detail_snapshot "$run_id" 1 https://example.test/jobs
 grep -q '"detail_snapshot_id":1' <<<"$detail_receipt"
 ! grep -q 'Visible job detail' <<<"$detail_receipt"
 
+queued_receipt="$("$STAGE" queue_detail "$run_id" 1 https://example.test/jobs/2 ok ref-detail-2 "" "$payload")"
+grep -q '"detail_snapshot_id":2' <<<"$queued_receipt"
+grep -q '"judge_item_id":' <<<"$queued_receipt"
+! grep -q 'Visible job detail' <<<"$queued_receipt"
+judge_ref="$(sqlite3 "$TMP_DB" "SELECT input_ref FROM stage_items WHERE run_id = $run_id AND stage = 'judge';")"
+[[ "$judge_ref" == "detail_snapshot:2" ]]
+
 empty_claim="$("$STAGE" claim "$run_id" browser worker-b)"
 grep -q '"claimed":0' <<<"$empty_claim"
 grep -q '"done":true' <<<"$empty_claim"
 
 summary="$("$STAGE" summary "$run_id")"
-grep -q '"items":1' <<<"$summary"
+grep -q '"items":2' <<<"$summary"
 grep -q '"page_snapshots":1' <<<"$summary"
 grep -q '"job_seeds":1' <<<"$summary"
-grep -q '"detail_snapshots":1' <<<"$summary"
+grep -q '"detail_snapshots":2' <<<"$summary"
 
 finish_run="$("$STAGE" run_finish "$run_id" ok)"
 grep -q '"run_status":"ok"' <<<"$finish_run"

@@ -35,6 +35,7 @@ Writes:
 - `job_seeds`
 - title/history skip attempts
 - `detail_snapshots`
+- pending `judge` stage items via `queue_detail`
 - `stage_items` status
 - compact `stage_events`
 
@@ -48,7 +49,8 @@ Procedure:
    - LinkedIn: `https://www.linkedin.com/jobs/view/<id>`
    - Wellfound: `https://wellfound.com/jobs/<id>-<slug>`
 5. Batch-check history with `db_scan.sh attempted_many <url...>`.
-6. For new cards, persist seeds and bounded detail snapshots.
+6. For new cards, persist seeds and bounded detail snapshots with
+   `db_stage.sh queue_detail`; this queues judge work by reference.
 7. Persist title/history skips as attempts.
 8. Finish/fail the stage item with `db_stage.sh finish` / `fail`.
 

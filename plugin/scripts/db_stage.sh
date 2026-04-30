@@ -26,6 +26,8 @@ subcommands:
            <snippet> <source_snapshot_id> <rank> <status> [reason]
   detail_snapshot <run_id> <seed_id> <canonical_url> <fetch_status> \
                   <snapshot_ref> [error] [snapshot_text]
+  queue_detail <run_id> <seed_id> <canonical_url> <fetch_status> \
+               <snapshot_ref> [error] [snapshot_text]
   summary <run_id>
 EOF
   exit 2
@@ -283,6 +285,40 @@ SELECT json_object('status','ok','run_id',$run_id,'detail_snapshot_id',last_inse
 SQL
 }
 
+cmd_queue_detail() {
+  init_db
+  local run_id="${1:-}" seed_id="${2:-}" url="${3:-}" fetch_status="${4:-}"
+  local snapshot_ref="${5:-}" error="${6:-}" snapshot_text="${7:-}"
+  require_int run_id "$run_id"
+  require_int seed_id "$seed_id"
+  [[ -n "$url" && -n "$fetch_status" ]] || usage
+  db <<SQL
+BEGIN IMMEDIATE;
+INSERT INTO detail_snapshots(
+  run_id, seed_id, canonical_url, fetch_status, snapshot_text, snapshot_ref, error, captured_ts
+)
+VALUES($run_id, $seed_id, $(sql_quote "$url"), $(sql_quote "$fetch_status"),
+       NULLIF($(sql_quote "$snapshot_text"), ''), NULLIF($(sql_quote "$snapshot_ref"), ''),
+       NULLIF($(sql_quote "$error"), ''), CAST(strftime('%s','now') AS INTEGER));
+CREATE TEMP TABLE new_detail(id INTEGER PRIMARY KEY);
+INSERT INTO new_detail(id) VALUES(last_insert_rowid());
+INSERT INTO stage_items(
+  run_id, stage, status, input_ref, created_ts, updated_ts
+)
+SELECT $run_id, 'judge', 'pending', 'detail_snapshot:' || id,
+       CAST(strftime('%s','now') AS INTEGER),
+       CAST(strftime('%s','now') AS INTEGER)
+FROM new_detail;
+SELECT json_object(
+  'status','ok',
+  'run_id',$run_id,
+  'detail_snapshot_id',(SELECT id FROM new_detail),
+  'judge_item_id',last_insert_rowid()
+);
+COMMIT;
+SQL
+}
+
 cmd_summary() {
   init_db
   local run_id="${1:-}"
@@ -319,6 +355,7 @@ main() {
     page_snapshot)   cmd_page_snapshot "$@" ;;
     job_seed)        cmd_job_seed "$@" ;;
     detail_snapshot) cmd_detail_snapshot "$@" ;;
+    queue_detail)    cmd_queue_detail "$@" ;;
     summary)         cmd_summary "$@" ;;
     -h|--help|help)  usage ;;
     *)               echo "db_stage.sh: unknown subcommand: $sub" >&2; usage ;;
