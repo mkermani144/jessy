@@ -87,8 +87,19 @@ Procedure:
    - LinkedIn: `https://www.linkedin.com/jobs/view/<id>`
    - Wellfound: `https://wellfound.com/jobs/<id>-<slug>`
 7. Batch-check history with `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh --db <db_path> attempted_many <url...>`.
-8. For new cards, persist seeds and bounded detail snapshots with
-   `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> queue_detail`; this queues judge work by reference.
+8. For each new canonical URL, navigate to the detail page (open a new
+   tab with `mcp__claude-in-chrome__navigate` or click into the card
+   from the list pane), wait for the description to render, and use
+   `mcp__claude-in-chrome__read_page` to capture the bounded job
+   description (requirements, responsibilities, stack, salary, location,
+   visa, summary). The judge worker has no Chrome access, so the
+   `snapshot_text` you pass to `queue_detail` is the ONLY data the
+   judge will see — passing the list snippet here is insufficient and
+   produces score=50 "no signals" rows. Cap the captured text to keep
+   it bounded (a few KB), then call
+   `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> queue_detail <run_id> <seed_id> <canonical_url> <fetch_status> <snapshot_ref> "" "<snapshot_text>"`.
+   This both writes the detail snapshot and queues the judge stage item
+   by reference.
 9. Persist title/history skips as attempts.
 10. Finish/fail the stage item with `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> finish` / `fail`.
 
