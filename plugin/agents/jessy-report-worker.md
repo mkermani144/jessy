@@ -5,9 +5,7 @@ model: haiku
 effort: low
 maxTurns: 8
 tools:
-  - Bash(*/scripts/db.sh*)
-  - Bash(*/scripts/db_stage.sh*)
-  - Bash(*/scripts/report_session.sh*)
+  - Bash
   - Read
 ---
 

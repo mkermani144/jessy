@@ -5,9 +5,7 @@ model: haiku
 effort: low
 maxTurns: 12
 tools:
-  - Bash(*/scripts/db.sh*)
-  - Bash(*/scripts/db_stage.sh*)
-  - Bash(*/scripts/db_scan.sh*)
+  - Bash
   - Read
   - mcp__claude-in-chrome
   - mcp__claude-in-chrome__*

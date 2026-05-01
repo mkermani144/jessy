@@ -5,8 +5,7 @@ model: sonnet
 effort: low
 maxTurns: 10
 tools:
-  - Bash(*/scripts/db.sh*)
-  - Bash(*/scripts/db_stage.sh*)
+  - Bash
   - Read
   - Edit
 ---

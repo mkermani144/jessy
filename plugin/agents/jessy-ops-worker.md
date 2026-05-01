@@ -5,11 +5,7 @@ model: haiku
 effort: low
 maxTurns: 8
 tools:
-  - Bash(*/scripts/db.sh*)
-  - Bash(*/scripts/db_stage.sh*)
-  - Bash(*/scripts/db_path.sh*)
-  - Bash(*/scripts/onboard.sh*)
-  - Bash(*/scripts/db_scan.sh*)
+  - Bash
   - Read
 ---
 
