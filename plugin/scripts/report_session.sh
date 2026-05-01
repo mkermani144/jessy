@@ -122,15 +122,30 @@ write_index_tsv() {
 
 open_report_if_possible() {
   # Tests can disable tmux to avoid opening extra windows.
+  # Sets TMUX_REPORT_HINT to a short string the prompt can include so the
+  # user knows where to view the cards.
   local cards_file="$1"
+  TMUX_REPORT_HINT=""
   [[ -s "$cards_file" ]] || return 0
   [[ "${JESSY_REPORT_NO_TMUX:-0}" != "1" ]] || return 0
   command -v tmux >/dev/null 2>&1 || return 0
   command -v less >/dev/null 2>&1 || return 0
-  tmux display-message -p '#S' >/dev/null 2>&1 || return 0
 
-  tmux new-window -n jessy-report "less -R $(shell_quote "$cards_file")" \
-    >/dev/null 2>&1 || true
+  if [[ -n "${TMUX:-}" ]] || tmux display-message -p '#S' >/dev/null 2>&1; then
+    if tmux new-window -n jessy-report "less -R $(shell_quote "$cards_file")" \
+        >/dev/null 2>&1; then
+      TMUX_REPORT_HINT="opened tmux window 'jessy-report'"
+      return 0
+    fi
+  fi
+
+  # No active tmux session (or new-window failed). Spawn a detached session
+  # the user can attach to, instead of dropping the report on the floor.
+  tmux kill-session -t jessy-report >/dev/null 2>&1 || true
+  if tmux new-session -d -s jessy-report \
+      "less -R $(shell_quote "$cards_file")" >/dev/null 2>&1; then
+    TMUX_REPORT_HINT="attach with: tmux attach -t jessy-report"
+  fi
 }
 
 cmd_prepare() {
@@ -160,7 +175,11 @@ cmd_prepare() {
   mv "$state_tmp" "$JESSY_REPORT_STATE"
 
   if [[ -s "$snapshot" ]]; then
-    prompt="Review report outside chat, then reply with indices (e.g. 1,3), all, or none."
+    if [[ -n "${TMUX_REPORT_HINT:-}" ]]; then
+      prompt="Review report (${TMUX_REPORT_HINT}), then reply with indices (e.g. 1,3), all, or none."
+    else
+      prompt="Review report outside chat, then reply with indices (e.g. 1,3), all, or none."
+    fi
   else
     prompt="No unseen jobs; run /jessy:run first."
   fi
