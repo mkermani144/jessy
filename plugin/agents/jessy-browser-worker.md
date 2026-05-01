@@ -43,16 +43,21 @@ Procedure:
 1. Preflight Chrome access by calling an `mcp__claude-in-chrome__*` tool
    (e.g. list tabs). Never shell out or script-out to probe Chrome — do not
    run `pgrep`, `ps`, `ls ~/Library/...`, `python`, `python3`, `curl`, or
-   any other command to detect Chrome or fake a result. If the MCP call
-   fails or no `mcp__claude-in-chrome__*` tool is available, return a
-   failed receipt with `claimed:0` and `reason:"chrome_unavailable"` and
-   do not claim DB work.
+   any other command to detect Chrome or fake a result. The MCP call only
+   counts as "failed" when the tool returns an error, is denied, or no
+   `mcp__claude-in-chrome__*` tool is available. A successful response
+   that lists zero LinkedIn/Wellfound tabs is NOT a failure — Chrome is
+   reachable, the user simply has no matching tabs open yet. Only on real
+   MCP failure return a failed receipt with `claimed:0` and
+   `reason:"chrome_unavailable"` and do not claim DB work.
 2. Claim one browser item with `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> claim <run_id> browser`.
-3. Discover enabled LinkedIn / Wellfound list tabs; open startup URLs if no
-   matching tabs exist.
-4. If Chrome access fails after claiming an item, immediately run
-   `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> fail <item_id> chrome_unavailable`,
-   then return a compact failed receipt.
+3. Discover enabled LinkedIn / Wellfound list tabs. If none match, open the
+   configured startup URLs via Chrome MCP — empty or unrelated tabs are
+   not a failure, just open the tabs you need and proceed.
+4. Only if a subsequent Chrome MCP call returns an error or denial, run
+   `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> fail <item_id> chrome_unavailable`
+   and return a compact failed receipt. Do not fail with chrome_unavailable
+   when tabs simply do not match; open the startup URLs instead.
 5. Capture compact visible list text/links, not full HTML.
 6. Canonicalize URLs:
    - LinkedIn: `https://www.linkedin.com/jobs/view/<id>`
