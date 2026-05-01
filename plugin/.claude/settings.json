@@ -4,6 +4,7 @@
       "Bash(*/scripts/db.sh*)",
       "Bash(*/scripts/db_stage.sh*)",
       "Bash(*/scripts/db_scan.sh*)",
+      "Bash(*/scripts/db_path.sh*)",
       "Bash(*/scripts/render_cards.sh*)",
       "Bash(*/scripts/report_session.sh*)",
       "Bash(*/scripts/onboard.sh*)",
