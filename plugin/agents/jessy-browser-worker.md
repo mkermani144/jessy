@@ -1,9 +1,9 @@
 ---
 name: jessy-browser-worker
 description: Jessy browser worker. Use for Chrome-facing list/detail capture, title/history prefilter, and snapshot persistence. Return counts and refs only.
-model: haiku
+model: sonnet
 effort: low
-maxTurns: 12
+maxTurns: 25
 ---
 
 # Jessy Browser Worker
@@ -27,6 +27,16 @@ Rules:
 - Stop each tab/feed at the first Jessy-attempted canonical URL.
 - Ignore platform viewed/saved/applied UI state.
 - Honor `platforms.<name>.startup_urls`, `max_pages`, and `max_new_per_run`.
+- Before returning ANY receipt (success, partial, or error), ensure every
+  item you claimed has a `finish` or `fail` call against db_stage.sh. Never
+  exit leaving an item in `claimed` state. If you run out of budget mid-flow,
+  call `fail <item_id> partial_progress` so the supervisor can recover.
+- Do not invent db helper subcommands. Allowed: `claim`, `claim_batch`,
+  `finish`, `fail`, `enqueue`, `queue_detail`, `page_snapshot`, `job_seed`,
+  `detail_snapshot`, `summary` on `db_stage.sh`; `attempted_many`,
+  `skip_job`, `score_job`, `fail_attempt`, `bump_learn` on `db_scan.sh`.
+  Read `~/.jessy/config.yaml` directly with the `Read` tool — there is no
+  `db_scan.sh config` subcommand.
 
 Writes:
 
