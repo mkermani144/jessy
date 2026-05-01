@@ -44,8 +44,11 @@ Writes:
 
 Procedure:
 
-1. Preflight Chrome access by listing/reading tabs. If Chrome access fails,
-   return a failed receipt with `claimed:0` and do not claim DB work.
+1. Preflight Chrome access by calling an `mcp__claude-in-chrome__*` tool
+   (e.g. list tabs). Never shell out to probe Chrome — do not run `pgrep`,
+   `ps`, `ls ~/Library/...`, or any other shell command to detect Chrome.
+   If the MCP call fails, return a failed receipt with `claimed:0` and do
+   not claim DB work.
 2. Claim one browser item with `db_stage.sh --db <db_path> claim <run_id> browser`.
 3. Discover enabled LinkedIn / Wellfound list tabs; open startup URLs if no
    matching tabs exist.
