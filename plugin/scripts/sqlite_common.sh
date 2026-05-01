@@ -35,7 +35,7 @@ sqlite_open() {
   sqlite_require
   local db_path="$1" err rc
   shift
-  err="$(mktemp)"
+  err="$(mktemp "$(dirname "$db_path")/.jessy-err.XXXXXX")"
   if sqlite3 -cmd '.timeout 15000' -bail -batch "$db_path" "$@" 2>"$err"; then
     rm -f "$err"
     return 0

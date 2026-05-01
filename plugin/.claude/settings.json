@@ -34,5 +34,10 @@
       "Write(~/.jessy/preferences.md)"
     ],
     "additionalDirectories": ["~/.jessy"]
+  },
+  "sandbox": {
+    "filesystem": {
+      "allowWrite": ["~/.jessy"]
+    }
   }
 }
