@@ -1,7 +1,7 @@
 ---
 name: jessy-scan
 description: Supervise context-isolated Jessy browser and judge workers. Main thread sees receipts only, never job payloads.
-model: haiku
+model: sonnet
 effort: low
 user-invocable: false
 allowed-tools:
