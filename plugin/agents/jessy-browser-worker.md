@@ -68,7 +68,16 @@ Procedure:
    `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> fail <item_id> chrome_unavailable`
    and return a compact failed receipt. Do not fail with chrome_unavailable
    when tabs simply do not match; open the startup URLs instead.
-5. Capture compact visible list text/links, not full HTML.
+5. Capture compact visible list text/links, not full HTML. LinkedIn and
+   Wellfound use virtualized feeds — only the visible viewport renders
+   real cards, so a single capture sees only the first few. Iterate
+   scroll-and-capture: capture, then scroll the job list container down
+   by roughly a viewport (page-down or `mcp__claude-in-chrome__computer`
+   scroll), wait for new cards to render, capture again. Stop scrolling
+   when any of these is true: (a) you hit a previously-attempted
+   canonical URL, (b) you have already gathered `max_new_per_run`
+   new seeds, (c) you have completed `max_pages` scroll cycles, or
+   (d) a scroll produced no new card URLs.
 6. Canonicalize URLs:
    - LinkedIn: `https://www.linkedin.com/jobs/view/<id>`
    - Wellfound: `https://wellfound.com/jobs/<id>-<slug>`
