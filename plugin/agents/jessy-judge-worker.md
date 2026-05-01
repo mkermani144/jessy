@@ -41,6 +41,43 @@ Rules:
 - Evidence strings stay short.
 - Return compact receipt only.
 
+Extraction:
+
+For every claimed `detail_snapshot:<id>` ref, call
+`${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> detail_context <id>`
+and read the `snapshot_text` from its JSON response BEFORE scoring.
+Never score from `job_seeds` snippet alone — the seed snippet is the
+list-card line; the actual job description lives in the snapshot text.
+
+Build the `extract_json` you pass to `db_scan.sh score_job` with
+exactly these keys (use `""` or `[]` only when the snapshot truly does
+not mention the field):
+
+```json
+{
+  "status": "ok",
+  "lang": "en",
+  "location": "...",
+  "seniority": "...",
+  "employment": "full-time | contract | ...",
+  "salary": "...",
+  "visa": "yes | no | ...",
+  "summary": ["one-line bullets describing the role"],
+  "evidence": ["short verbatim phrases supporting score"]
+}
+```
+
+`req_hard` and `req_nice` go as separate JSON-array arguments to
+`score_job` (required vs. nice-to-have stack/skills extracted from
+the snapshot, lowercased, deduped). Never default the rationale to
+"no tech stack signals in snapshot" when `detail_context` returned
+non-empty `snapshot_text` — extract the stack you do see, even if
+sparse, and let scoring decide.
+
+If `detail_context` returned empty/missing `snapshot_text` for a
+claimed item, use `db_scan.sh fail_attempt` with reason
+`empty_snapshot` instead of forcing a score of 50.
+
 Scoring:
 
 1. Start at `50`.
