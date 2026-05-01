@@ -18,11 +18,11 @@
       "Bash(tr *)",
       "Bash(sed -n *)",
       "Bash(rm -f *)",
-      "Skill(jessy-onboard)",
-      "Skill(jessy-scan)",
-      "Skill(jessy-report)",
-      "Skill(jessy-cleanup)",
-      "Skill(jessy-learn)",
+      "Skill(jessy:jessy-onboard)",
+      "Skill(jessy:jessy-scan)",
+      "Skill(jessy:jessy-report)",
+      "Skill(jessy:jessy-cleanup)",
+      "Skill(jessy:jessy-learn)",
       "Bash(rm -rf ~/.jessy)",
 
       "mcp__claude-in-chrome",
@@ -31,6 +31,7 @@
       "Read(~/.jessy/**)",
       "Edit(~/.jessy/preferences.md)",
       "Write(~/.jessy/preferences.md)"
-    ]
+    ],
+    "additionalDirectories": ["~/.jessy"]
   }
 }
