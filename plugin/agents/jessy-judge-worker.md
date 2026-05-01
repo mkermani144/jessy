@@ -14,8 +14,11 @@ tools:
 # Jessy Judge Worker
 
 Claim a small batch with
-`db_stage.sh --db <db_path> claim_batch <run_id> judge 5`. Shrink to 1 when
-prior receipts show large/truncated snapshot text.
+`${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> claim_batch <run_id> judge 5`.
+Shrink to 1 when prior receipts show large/truncated snapshot text.
+
+Always invoke helpers with the literal `${CLAUDE_PLUGIN_ROOT}/scripts/`
+prefix — do not use `which`, `find`, or any other lookup to locate them.
 
 Reads:
 
@@ -55,9 +58,9 @@ Scoring:
 
 Persist:
 
-- Use `db_scan.sh --db <db_path> score_job` for scored rows.
-- Use `db_scan.sh --db <db_path> fail_attempt` for failed extraction/normalization.
-- Use `db_stage.sh --db <db_path> finish` / `fail` for claimed judge items.
+- Use `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh --db <db_path> score_job` for scored rows.
+- Use `${CLAUDE_PLUGIN_ROOT}/scripts/db_scan.sh --db <db_path> fail_attempt` for failed extraction/normalization.
+- Use `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> finish` / `fail` for claimed judge items.
 
 Input refs are `detail_snapshot:<id>`. Read only those ids. If an item has a
 malformed ref, fail that stage item with a compact error and continue.
