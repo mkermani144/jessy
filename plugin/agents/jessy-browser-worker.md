@@ -4,11 +4,6 @@ description: Jessy browser worker. Use for Chrome-facing list/detail capture, ti
 model: haiku
 effort: low
 maxTurns: 12
-tools:
-  - Bash
-  - Read
-  - mcp__claude-in-chrome
-  - mcp__claude-in-chrome__*
 ---
 
 # Jessy Browser Worker
