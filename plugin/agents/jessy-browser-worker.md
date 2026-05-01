@@ -61,9 +61,14 @@ Procedure:
    MCP failure return a failed receipt with `claimed:0` and
    `reason:"chrome_unavailable"` and do not claim DB work.
 2. Claim one browser item with `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> claim <run_id> browser`.
-3. Discover enabled LinkedIn / Wellfound list tabs. If none match, open the
-   configured startup URLs via Chrome MCP — empty or unrelated tabs are
-   not a failure, just open the tabs you need and proceed.
+3. For every platform with `enabled: true`, ensure ONE Chrome tab exists
+   per entry in that platform's `startup_urls` list. If a tab already
+   exists for a configured URL, reuse it; otherwise open a new tab via
+   `mcp__claude-in-chrome__navigate`. Do not stop after the first
+   startup URL — `linkedin.startup_urls` is intentionally a list of
+   distinct search permalinks (different keywords, geos, filters), and
+   each one must be visited. Empty or unrelated tabs are not a failure;
+   just open the tabs you need and proceed.
 4. Only if a subsequent Chrome MCP call returns an error or denial, run
    `${CLAUDE_PLUGIN_ROOT}/scripts/db_stage.sh --db <db_path> fail <item_id> chrome_unavailable`
    and return a compact failed receipt. Do not fail with chrome_unavailable
