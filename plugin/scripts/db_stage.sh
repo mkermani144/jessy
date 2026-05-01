@@ -8,6 +8,15 @@ DB_SH="$SCRIPT_DIR/db.sh"
 source "$SCRIPT_DIR/sqlite_common.sh"
 
 : "${JESSY_DB:=$HOME/.jessy/jessy.db}"
+: "${JESSY_STALE_CLAIM_TTL:=300}"
+
+stale_claim_ttl() {
+  if [[ "$JESSY_STALE_CLAIM_TTL" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$JESSY_STALE_CLAIM_TTL"
+  else
+    printf '300'
+  fi
+}
 
 usage() {
   cat >&2 <<'EOF'
@@ -171,12 +180,17 @@ cmd_claim() {
   require_int run_id "$run_id"
   [[ -n "$stage" ]] || usage
   [[ -n "$claim_id" ]] || claim_id="claim-$(date +%s)-$$"
+  local ttl
+  ttl="$(stale_claim_ttl)"
   db <<SQL
 BEGIN IMMEDIATE;
 CREATE TEMP TABLE claim_target(id INTEGER PRIMARY KEY);
 INSERT INTO claim_target(id)
 SELECT id FROM stage_items
-WHERE run_id = $run_id AND stage = $(sql_quote "$stage") AND status = 'pending'
+WHERE run_id = $run_id AND stage = $(sql_quote "$stage")
+  AND (status = 'pending'
+       OR (status = 'claimed'
+           AND updated_ts < CAST(strftime('%s','now') AS INTEGER) - $ttl))
 ORDER BY id
 LIMIT 1;
 UPDATE stage_items
@@ -208,12 +222,17 @@ cmd_claim_batch() {
   require_int limit "$limit"
   [[ -n "$stage" ]] || usage
   [[ -n "$claim_id" ]] || claim_id="claim-$(date +%s)-$$"
+  local ttl
+  ttl="$(stale_claim_ttl)"
   db <<SQL
 BEGIN IMMEDIATE;
 CREATE TEMP TABLE claim_target(id INTEGER PRIMARY KEY);
 INSERT INTO claim_target(id)
 SELECT id FROM stage_items
-WHERE run_id = $run_id AND stage = $(sql_quote "$stage") AND status = 'pending'
+WHERE run_id = $run_id AND stage = $(sql_quote "$stage")
+  AND (status = 'pending'
+       OR (status = 'claimed'
+           AND updated_ts < CAST(strftime('%s','now') AS INTEGER) - $ttl))
 ORDER BY id
 LIMIT $limit;
 UPDATE stage_items
